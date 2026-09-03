@@ -8,16 +8,11 @@ const PORT = process.env.PORT || 3000;
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Conexión a SQLite
 const db = new sqlite3.Database('./stock7030.db', (err) => {
-  if (err) {
-    console.error('Error al conectar a SQLite:', err.message);
-  } else {
-    console.log('Conectado a la base de datos SQLite stock7030.db');
-  }
+  if (err) console.error('Error en SQLite:', err.message);
+  else console.log('Conectado a SQLite stock7030.db');
 });
 
-// Crear tablas si no existen
 db.serialize(() => {
   db.run(`
     CREATE TABLE IF NOT EXISTS productos (
@@ -26,7 +21,19 @@ db.serialize(() => {
       costo REAL DEFAULT 0,
       precio REAL DEFAULT 0,
       stock INTEGER DEFAULT 0,
-      codigo_barras TEXT
+      codigo_barras TEXT,
+      es_combo INTEGER DEFAULT 0
+    )
+  `);
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS combo_detalles (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      combo_id INTEGER,
+      ingrediente_id INTEGER,
+      cantidad INTEGER,
+      FOREIGN KEY(combo_id) REFERENCES productos(id) ON DELETE CASCADE,
+      FOREIGN KEY(ingrediente_id) REFERENCES productos(id)
     )
   `);
 
@@ -52,25 +59,76 @@ db.serialize(() => {
   `);
 });
 
-// --- RUTAS DE PRODUCTOS ---
-
+// --- OBTENER PRODUCTOS (Calculando stock dinámico de combos) ---
 app.get('/api/productos', (req, res) => {
-  const sql = `SELECT *, (stock <= 5) AS alerta_stock FROM productos ORDER BY nombre ASC`;
-  db.all(sql, [], (err, rows) => {
+  const sqlProductos = `SELECT *, (stock <= 5 AND es_combo = 0) AS alerta_stock FROM productos ORDER BY es_combo ASC, nombre ASC`;
+  const sqlCombos = `
+    SELECT cd.combo_id, cd.ingrediente_id, cd.cantidad, p.stock AS stock_ingrediente, p.nombre AS nombre_ingrediente
+    FROM combo_detalles cd
+    JOIN productos p ON cd.ingrediente_id = p.id
+  `;
+
+  db.all(sqlProductos, [], (err, productos) => {
     if (err) return res.status(500).json({ error: err.message });
-    res.json(rows);
+
+    db.all(sqlCombos, [], (err, detalles) => {
+      if (err) return res.status(500).json({ error: err.message });
+
+      const productosProcesados = productos.map(p => {
+        if (p.es_combo === 1) {
+          const componentes = detalles.filter(d => d.combo_id === p.id);
+          if (componentes.length === 0) {
+            p.stock = 0;
+          } else {
+            const maxCombosPosibles = componentes.map(c => Math.floor(c.stock_ingrediente / c.cantidad));
+            p.stock = Math.min(...maxCombosPosibles);
+          }
+          p.alerta_stock = p.stock === 0 ? 1 : 0;
+          p.componentes_txt = componentes.map(c => `${c.nombre_ingrediente} (x${c.cantidad})`).join(' + ');
+        }
+        return p;
+      });
+
+      res.json(productosProcesados);
+    });
   });
 });
 
+// --- CREAR PRODUCTO INDIVIDUAL ---
 app.post('/api/productos', (req, res) => {
   const { nombre, costo, precio, stock, codigo_barras } = req.body;
-  const sql = `INSERT INTO productos (nombre, costo, precio, stock, codigo_barras) VALUES (?, ?, ?, ?, ?)`;
+  const sql = `INSERT INTO productos (nombre, costo, precio, stock, codigo_barras, es_combo) VALUES (?, ?, ?, ?, ?, 0)`;
   db.run(sql, [nombre, costo || 0, precio || 0, stock || 0, codigo_barras || ''], function(err) {
     if (err) return res.status(500).json({ error: err.message });
     res.json({ id: this.lastID, nombre, costo, precio, stock, codigo_barras });
   });
 });
 
+// --- CREAR COMBO DINÁMICO ---
+app.post('/api/combos', (req, res) => {
+  const { nombre, precio, items } = req.body; // items: [{ ingrediente_id, cantidad }]
+  if (!nombre || !precio || !Array.isArray(items) || items.length === 0) {
+    return res.status(400).json({ error: 'Datos de combo incompletos' });
+  }
+
+  const sqlCombo = `INSERT INTO productos (nombre, costo, precio, stock, codigo_barras, es_combo) VALUES (?, 0, ?, 0, '', 1)`;
+  db.run(sqlCombo, [nombre, precio], function(err) {
+    if (err) return res.status(500).json({ error: err.message });
+    const comboId = this.lastID;
+
+    const stmt = db.prepare(`INSERT INTO combo_detalles (combo_id, ingrediente_id, cantidad) VALUES (?, ?, ?)`);
+    items.forEach(item => {
+      stmt.run(comboId, item.ingrediente_id, item.cantidad);
+    });
+
+    stmt.finalize((err) => {
+      if (err) return res.status(500).json({ error: err.message });
+      res.json({ success: true, comboId });
+    });
+  });
+});
+
+// --- IMPORTAR BULK ---
 app.post('/api/productos/bulk', (req, res) => {
   const { productos } = req.body;
   if (!Array.isArray(productos) || productos.length === 0) {
@@ -78,22 +136,18 @@ app.post('/api/productos/bulk', (req, res) => {
   }
 
   db.serialize(() => {
-    const stmt = db.prepare(`
-      INSERT INTO productos (nombre, costo, precio, stock, codigo_barras)
-      VALUES (?, ?, ?, ?, ?)
-    `);
-
+    const stmt = db.prepare(`INSERT INTO productos (nombre, costo, precio, stock, codigo_barras, es_combo) VALUES (?, ?, ?, ?, ?, 0)`);
     productos.forEach(p => {
       stmt.run(p.nombre, p.costo || 0, p.precio || 0, p.stock || 0, p.codigo_barras || '');
     });
-
     stmt.finalize((err) => {
       if (err) return res.status(500).json({ error: err.message });
-      res.json({ message: 'Productos importados con éxito' });
+      res.json({ message: 'Productos importados' });
     });
   });
 });
 
+// --- EDITAR PRODUCTO ---
 app.put('/api/productos/:id', (req, res) => {
   const { id } = req.params;
   const { nombre, costo, precio, stock, codigo_barras } = req.body;
@@ -104,90 +158,74 @@ app.put('/api/productos/:id', (req, res) => {
   });
 });
 
+// --- ELIMINAR PRODUCTO / COMBO ---
 app.delete('/api/productos/:id', (req, res) => {
   const { id } = req.params;
-  db.run(`DELETE FROM productos WHERE id = ?`, [id], function(err) {
-    if (err) return res.status(500).json({ error: err.message });
-    res.json({ deleted: this.changes });
-  });
-});
-
-// --- RUTAS DE VENTAS ---
-
-// Registrar nueva venta
-app.post('/api/ventas', (req, res) => {
-  const { metodo_pago, items, producto_id, cantidad, precio_unitario } = req.body;
-
-  let listaItems = [];
-  if (Array.isArray(items) && items.length > 0) {
-    listaItems = items;
-  } else if (producto_id && cantidad) {
-    listaItems = [{ producto_id, cantidad, precio_unitario }];
-  } else {
-    return res.status(400).json({ error: 'Datos de venta incompletos' });
-  }
-
-  let totalVenta = 0;
-  listaItems.forEach(item => {
-    totalVenta += (Number(item.precio_unitario) || 0) * (Number(item.cantidad) || 1);
-  });
-
-  const sqlVenta = `INSERT INTO ventas (total, metodo_pago) VALUES (?, ?)`;
-
-  db.run(sqlVenta, [totalVenta, metodo_pago || 'EFECTIVO'], function(err) {
-    if (err) return res.status(500).json({ error: err.message });
-
-    const ventaId = this.lastID;
-    let pendientes = listaItems.length;
-    let huboError = false;
-
-    listaItems.forEach(item => {
-      db.run(
-        `INSERT INTO venta_detalles (venta_id, producto_id, cantidad, precio_unitario) VALUES (?, ?, ?, ?)`,
-        [ventaId, item.producto_id, item.cantidad, item.precio_unitario || 0]
-      );
-
-      db.run(
-        `UPDATE productos SET stock = stock - ? WHERE id = ?`,
-        [item.cantidad, item.producto_id],
-        (err) => {
-          if (err) huboError = true;
-          pendientes--;
-          if (pendientes === 0) {
-            if (huboError) {
-              return res.status(500).json({ error: 'Venta registrada pero con detalles en stock' });
-            }
-            res.json({ success: true, ventaId, total: totalVenta });
-          }
-        }
-      );
+  db.run(`DELETE FROM combo_detalles WHERE combo_id = ?`, [id], () => {
+    db.run(`DELETE FROM productos WHERE id = ?`, [id], function(err) {
+      if (err) return res.status(500).json({ error: err.message });
+      res.json({ deleted: this.changes });
     });
   });
 });
 
-// Obtener historial de ventas
+// --- REGISTRAR VENTA (DESCUENTO AUTOMÁTICO DE INGREDIENTES) ---
+app.post('/api/ventas', (req, res) => {
+  const { metodo_pago, producto_id, cantidad } = req.body;
+  const cantVenta = Number(cantidad) || 1;
+
+  db.get(`SELECT * FROM productos WHERE id = ?`, [producto_id], (err, producto) => {
+    if (err || !producto) return res.status(400).json({ error: 'Producto no encontrado' });
+
+    const totalVenta = producto.precio * cantVenta;
+
+    db.run(`INSERT INTO ventas (total, metodo_pago) VALUES (?, ?)`, [totalVenta, metodo_pago || 'EFECTIVO'], function(err) {
+      if (err) return res.status(500).json({ error: err.message });
+      const ventaId = this.lastID;
+
+      db.run(`INSERT INTO venta_detalles (venta_id, producto_id, cantidad, precio_unitario) VALUES (?, ?, ?, ?)`,
+        [ventaId, producto_id, cantVenta, producto.precio]
+      );
+
+      if (producto.es_combo === 1) {
+        // Descontar componentes sueltos
+        db.all(`SELECT ingrediente_id, cantidad FROM combo_detalles WHERE combo_id = ?`, [producto_id], (err, componentes) => {
+          if (err) return res.status(500).json({ error: err.message });
+
+          componentes.forEach(comp => {
+            const descuentaTotal = comp.cantidad * cantVenta;
+            db.run(`UPDATE productos SET stock = stock - ? WHERE id = ?`, [descuentaTotal, comp.ingrediente_id]);
+          });
+          res.json({ success: true, ventaId, total: totalVenta });
+        });
+      } else {
+        // Descontar producto simple
+        db.run(`UPDATE productos SET stock = stock - ? WHERE id = ?`, [cantVenta, producto_id], (err) => {
+          if (err) return res.status(500).json({ error: err.message });
+          res.json({ success: true, ventaId, total: totalVenta });
+        });
+      }
+    });
+  });
+});
+
+// --- HISTORIAL VENTAS ---
 app.get('/api/ventas', (req, res) => {
   const sql = `
-    SELECT 
-      v.id, 
-      v.fecha, 
-      v.total, 
-      v.metodo_pago,
+    SELECT v.id, v.fecha, v.total, v.metodo_pago,
       GROUP_CONCAT(p.nombre || ' (x' || vd.cantidad || ')', ', ') AS items_detalle
     FROM ventas v
     LEFT JOIN venta_detalles vd ON v.id = vd.venta_id
     LEFT JOIN productos p ON vd.producto_id = p.id
-    GROUP BY v.id
-    ORDER BY v.id DESC
+    GROUP BY v.id ORDER BY v.id DESC
   `;
-
   db.all(sql, [], (err, rows) => {
     if (err) return res.status(500).json({ error: err.message });
     res.json(rows);
   });
 });
 
-// Reiniciar / Vaciar historial de ventas
+// --- RESET VENTAS ---
 app.delete('/api/ventas/reset', (req, res) => {
   db.serialize(() => {
     db.run(`DELETE FROM venta_detalles`);
@@ -195,10 +233,10 @@ app.delete('/api/ventas/reset', (req, res) => {
     db.run(`DELETE FROM sqlite_sequence WHERE name='ventas' OR name='venta_detalles'`);
   }, (err) => {
     if (err) return res.status(500).json({ error: err.message });
-    res.json({ success: true, message: 'Historial de ventas reiniciado a cero' });
+    res.json({ success: true, message: 'Historial vaciado' });
   });
 });
 
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`Servidor iniciado correctamente. Puedes acceder localmente en http://localhost:${PORT}`);
+  console.log(`Servidor en ejecucion en http://localhost:${PORT}`);
 });
