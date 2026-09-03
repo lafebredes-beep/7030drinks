@@ -62,7 +62,7 @@
         </div>
       </div>
 
-      <!-- Cargar Productos Individuales -->
+      <!-- Cargar Productos Individuales / CSV -->
       <div class="p-5 bg-white rounded-lg border shadow-sm space-y-4">
         <div class="flex justify-between items-center">
           <h2 class="text-lg font-bold text-gray-800">Cargar / Importar Productos Sueltos</h2>
@@ -213,6 +213,13 @@
       };
       if (!p.nombre || !p.precio) return alert('Ingresa nombre y precio');
       await fetch('/api/productos', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) });
+      
+      document.getElementById('nombre').value = '';
+      document.getElementById('costo').value = '';
+      document.getElementById('precio').value = '';
+      document.getElementById('stock').value = '';
+      document.getElementById('codigo_barras').value = '';
+      
       cargarProductos();
     }
 
@@ -241,6 +248,63 @@
         document.getElementById('comboPrecio').value = '';
         cargarProductos();
       }
+    }
+
+    function importarCSV(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = async function(e) {
+        const texto = e.target.result;
+        const lineas = texto.split('\n');
+        const productos = [];
+
+        for (let i = 0; i < lineas.length; i++) {
+          const linea = lineas[i].trim();
+          if (!linea) continue;
+
+          // Si la primera línea tiene encabezados (ej. Nombre, Costo...), la salta
+          if (i === 0 && (linea.toLowerCase().includes('nombre') || linea.toLowerCase().includes('producto'))) {
+            continue;
+          }
+
+          // Soporta separación por coma (,) o punto y coma (;) de Excel
+          const separador = linea.includes(';') ? ';' : ',';
+          const campos = linea.split(separador);
+
+          if (campos.length >= 2) {
+            productos.push({
+              nombre: campos[0]?.trim().replace(/^"|"$/g, ''),
+              costo: Number(campos[1]?.trim()) || 0,
+              precio: Number(campos[2]?.trim()) || 0,
+              stock: Number(campos[3]?.trim()) || 0,
+              codigo_barras: campos[4]?.trim().replace(/^"|"$/g, '') || ''
+            });
+          }
+        }
+
+        if (productos.length === 0) {
+          return alert('No se encontraron productos válidos en el archivo CSV.');
+        }
+
+        const res = await fetch('/api/productos/bulk', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ productos })
+        });
+
+        if (res.ok) {
+          alert(`¡Se importaron ${productos.length} productos con éxito!`);
+          cargarProductos();
+        } else {
+          alert('Error al importar productos.');
+        }
+
+        event.target.value = '';
+      };
+
+      reader.readAsText(file);
     }
 
     async function registrarVenta() {
