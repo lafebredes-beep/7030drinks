@@ -8,6 +8,7 @@
 <body class="bg-gray-100 p-6">
   <div class="max-w-6xl mx-auto space-y-6">
     
+    <!-- Encabezado / Tabs -->
     <div class="bg-white p-6 rounded-lg shadow">
       <h1 class="text-3xl font-bold text-center text-gray-800 mb-6">70/30 Drinks - Sistema de Control</h1>
       <div class="flex justify-center border-b border-gray-200 space-x-4">
@@ -62,10 +63,10 @@
         </div>
       </div>
 
-      <!-- Cargar Productos Individuales / CSV -->
+      <!-- Cargar / Editar Productos Individuales -->
       <div class="p-5 bg-white rounded-lg border shadow-sm space-y-4">
         <div class="flex justify-between items-center">
-          <h2 class="text-lg font-bold text-gray-800">Cargar / Importar Productos Sueltos</h2>
+          <h2 id="tituloFormProducto" class="text-lg font-bold text-gray-800">Cargar / Importar Productos Sueltos</h2>
           <label class="bg-purple-600 text-white px-4 py-2 rounded-lg cursor-pointer hover:bg-purple-700 text-sm font-medium">
             📁 Importar desde CSV
             <input type="file" id="inputCSV" accept=".csv" class="hidden" onchange="importarCSV(event)">
@@ -78,7 +79,10 @@
           <input id="stock" type="number" placeholder="Stock" class="p-2 border rounded">
           <input id="codigo_barras" type="text" placeholder="Cód. Barras" class="p-2 border rounded">
         </div>
-        <button onclick="guardarProducto()" class="bg-green-600 text-white font-medium px-4 py-2 rounded hover:bg-green-700">Guardar Producto</button>
+        <div class="flex gap-2">
+          <button id="btnGuardarProd" onclick="guardarProducto()" class="bg-green-600 text-white font-medium px-4 py-2 rounded hover:bg-green-700">Guardar Producto</button>
+          <button id="btnCancelarEdit" onclick="cancelarEdicion()" class="bg-gray-400 text-white font-medium px-4 py-2 rounded hover:bg-gray-500 hidden">Cancelar Edición</button>
+        </div>
       </div>
 
       <!-- Tabla Inventario -->
@@ -152,6 +156,7 @@
 
   <script>
     let listaProductos = [];
+    let editandoId = null;
 
     function cambiarTab(tab) {
       document.getElementById('seccionInventario').classList.toggle('hidden', tab !== 'inventario');
@@ -195,12 +200,51 @@
             <td class="border p-2 text-center font-bold ${p.alerta_stock ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}">
               ${p.alerta_stock ? 'SIN STOCK / REPONER' : 'DISPONIBLE'}
             </td>
-            <td class="border p-2 text-center">
-              <button onclick="eliminarProducto(${p.id})" class="p-1 bg-red-100 text-red-800 rounded hover:bg-red-200">🗑️</button>
+            <td class="border p-2 text-center space-x-1">
+              ${p.es_combo === 0 ? `<button onclick="prepararEdicion(${p.id})" class="p-1 bg-amber-100 text-amber-800 rounded hover:bg-amber-200" title="Editar">✏️</button>` : ''}
+              <button onclick="eliminarProducto(${p.id})" class="p-1 bg-red-100 text-red-800 rounded hover:bg-red-200" title="Eliminar">🗑️</button>
             </td>
           </tr>
         `;
       });
+    }
+
+    function prepararEdicion(id) {
+      const prod = listaProductos.find(p => p.id === id);
+      if (!prod) return;
+
+      editandoId = id;
+      document.getElementById('nombre').value = prod.nombre;
+      document.getElementById('costo').value = prod.costo;
+      document.getElementById('precio').value = prod.precio;
+      document.getElementById('stock').value = prod.stock;
+      document.getElementById('codigo_barras').value = prod.codigo_barras || '';
+
+      document.getElementById('tituloFormProducto').innerText = '✏️ Editar Producto Suelto';
+      
+      const btnGuardar = document.getElementById('btnGuardarProd');
+      btnGuardar.innerText = 'Actualizar Producto';
+      btnGuardar.className = 'bg-amber-600 text-white font-medium px-4 py-2 rounded hover:bg-amber-700';
+      
+      document.getElementById('btnCancelarEdit').classList.remove('hidden');
+      window.scrollTo({ top: 300, behavior: 'smooth' });
+    }
+
+    function cancelarEdicion() {
+      editandoId = null;
+      document.getElementById('nombre').value = '';
+      document.getElementById('costo').value = '';
+      document.getElementById('precio').value = '';
+      document.getElementById('stock').value = '';
+      document.getElementById('codigo_barras').value = '';
+
+      document.getElementById('tituloFormProducto').innerText = 'Cargar / Importar Productos Sueltos';
+      
+      const btnGuardar = document.getElementById('btnGuardarProd');
+      btnGuardar.innerText = 'Guardar Producto';
+      btnGuardar.className = 'bg-green-600 text-white font-medium px-4 py-2 rounded hover:bg-green-700';
+
+      document.getElementById('btnCancelarEdit').classList.add('hidden');
     }
 
     async function guardarProducto() {
@@ -211,15 +255,31 @@
         stock: Number(document.getElementById('stock').value),
         codigo_barras: document.getElementById('codigo_barras').value
       };
+
       if (!p.nombre || !p.precio) return alert('Ingresa nombre y precio');
-      await fetch('/api/productos', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) });
-      
-      document.getElementById('nombre').value = '';
-      document.getElementById('costo').value = '';
-      document.getElementById('precio').value = '';
-      document.getElementById('stock').value = '';
-      document.getElementById('codigo_barras').value = '';
-      
+
+      if (editandoId) {
+        // Modo Edición
+        await fetch(`/api/productos/${editandoId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(p)
+        });
+        cancelarEdicion();
+      } else {
+        // Modo Nuevo
+        await fetch('/api/productos', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(p)
+        });
+        document.getElementById('nombre').value = '';
+        document.getElementById('costo').value = '';
+        document.getElementById('precio').value = '';
+        document.getElementById('stock').value = '';
+        document.getElementById('codigo_barras').value = '';
+      }
+
       cargarProductos();
     }
 
@@ -264,12 +324,10 @@
           const linea = lineas[i].trim();
           if (!linea) continue;
 
-          // Si la primera línea tiene encabezados (ej. Nombre, Costo...), la salta
           if (i === 0 && (linea.toLowerCase().includes('nombre') || linea.toLowerCase().includes('producto'))) {
             continue;
           }
 
-          // Soporta separación por coma (,) o punto y coma (;) de Excel
           const separador = linea.includes(';') ? ';' : ',';
           const campos = linea.split(separador);
 
