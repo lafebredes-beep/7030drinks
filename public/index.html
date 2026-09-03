@@ -1,0 +1,501 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>Control de Stock y Ventas - 70/30 Drinks</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 p-6">
+  <div class="max-w-6xl mx-auto space-y-6">
+    
+    <!-- Encabezado y Pestañas -->
+    <div class="bg-white p-6 rounded-lg shadow">
+      <h1 class="text-3xl font-bold text-center text-gray-800 mb-6">70/30 Drinks - Sistema de Control</h1>
+      
+      <div class="flex justify-center border-b border-gray-200 space-x-4">
+        <button id="btnTabInventario" onclick="cambiarTab('inventario')" class="pb-3 px-6 font-bold border-b-4 border-blue-600 text-blue-600 focus:outline-none transition-colors">
+          📦 Inventario y Venta Rápida
+        </button>
+        <button id="btnTabVentas" onclick="cambiarTab('ventas')" class="pb-3 px-6 font-bold border-b-4 border-transparent text-gray-500 hover:text-blue-600 focus:outline-none transition-colors">
+          📊 Historial de Ventas
+        </button>
+      </div>
+    </div>
+
+    <!-- PESTAÑA 1: INVENTARIO Y VENTA RÁPIDA -->
+    <div id="seccionInventario" class="space-y-6">
+      
+      <!-- Registrar Venta -->
+      <div class="p-5 bg-white border border-blue-200 rounded-lg shadow-sm">
+        <h2 class="text-lg font-bold mb-3 text-blue-900">Registrar Venta Rápida</h2>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <select id="selectProducto" class="p-2.5 border rounded-lg w-full bg-gray-50">
+            <option value="">Seleccionar Producto...</option>
+          </select>
+          <input id="cantVenta" type="number" placeholder="Cantidad" value="1" min="1" class="p-2.5 border rounded-lg w-full">
+          <select id="metodoPago" class="p-2.5 border rounded-lg w-full bg-gray-50">
+            <option value="EFECTIVO">Efectivo</option>
+            <option value="MERCADO_PAGO">Mercado Pago</option>
+            <option value="TRANSFERENCIA">Transferencia</option>
+          </select>
+        </div>
+        <button onclick="registrarVenta()" class="mt-4 bg-blue-600 text-white font-semibold px-5 py-2.5 rounded-lg hover:bg-blue-700 transition">
+          Confirmar Venta
+        </button>
+      </div>
+
+      <!-- Cargar e Importar Productos -->
+      <div class="p-5 bg-white rounded-lg border shadow-sm space-y-4">
+        <div class="flex justify-between items-center">
+          <h2 class="text-lg font-bold text-gray-800">Cargar / Importar Productos</h2>
+          <div>
+            <label class="bg-purple-600 text-white px-4 py-2 rounded-lg cursor-pointer hover:bg-purple-700 text-sm font-medium">
+              📁 Importar desde Excel (.csv)
+              <input type="file" id="inputCSV" accept=".csv" class="hidden" onchange="importarCSV(event)">
+            </label>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-2 md:grid-cols-6 gap-2">
+          <input id="nombre" type="text" placeholder="Nombre (ej. Fernet)" class="p-2 border rounded col-span-2">
+          <input id="costo" type="number" placeholder="Costo" class="p-2 border rounded">
+          <input id="precio" type="number" placeholder="Precio" class="p-2 border rounded">
+          <input id="stock" type="number" placeholder="Stock" class="p-2 border rounded">
+          <input id="codigo_barras" type="text" placeholder="Código Barras" class="p-2 border rounded">
+        </div>
+        <button onclick="guardarProducto()" class="bg-green-600 text-white font-medium px-4 py-2 rounded hover:bg-green-700">
+          Guardar Producto
+        </button>
+      </div>
+
+      <!-- Lista de Stock -->
+      <div class="bg-white p-5 rounded-lg border shadow-sm">
+        <h2 class="text-lg font-bold mb-3 text-gray-800">Inventario Actual</h2>
+        <div class="overflow-x-auto">
+          <table class="w-full border-collapse border border-gray-300 text-sm">
+            <thead>
+              <tr class="bg-gray-100 text-left">
+                <th class="border p-2 text-center">ID</th>
+                <th class="border p-2">Código</th>
+                <th class="border p-2">Producto</th>
+                <th class="border p-2 text-center">Costo</th>
+                <th class="border p-2 text-center">Precio</th>
+                <th class="border p-2 text-center">Stock</th>
+                <th class="border p-2 text-center">Estado</th>
+                <th class="border p-2 text-center">Acciones</th>
+              </tr>
+            </thead>
+            <tbody id="tablaProductos"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- PESTAÑA 2: HISTORIAL DE VENTAS Y CAJA -->
+    <div id="seccionVentas" class="space-y-6 hidden">
+      
+      <!-- Tarjetas Resumen de Pagos -->
+      <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div class="bg-white p-4 rounded-lg border shadow-sm border-l-4 border-l-green-500">
+          <span class="text-xs font-bold text-gray-500 uppercase">Total Recaudado</span>
+          <p id="totalRecaudado" class="text-2xl font-bold text-gray-800 mt-1">$0</p>
+        </div>
+        <div class="bg-white p-4 rounded-lg border shadow-sm border-l-4 border-l-emerald-500">
+          <span class="text-xs font-bold text-gray-500 uppercase">Efectivo</span>
+          <p id="totalEfectivo" class="text-2xl font-bold text-emerald-600 mt-1">$0</p>
+        </div>
+        <div class="bg-white p-4 rounded-lg border shadow-sm border-l-4 border-l-blue-500">
+          <span class="text-xs font-bold text-gray-500 uppercase">Mercado Pago</span>
+          <p id="totalMercadoPago" class="text-2xl font-bold text-blue-600 mt-1">$0</p>
+        </div>
+        <div class="bg-white p-4 rounded-lg border shadow-sm border-l-4 border-l-purple-500">
+          <span class="text-xs font-bold text-gray-500 uppercase">Transferencia</span>
+          <p id="totalTransferencia" class="text-2xl font-bold text-purple-600 mt-1">$0</p>
+        </div>
+      </div>
+
+      <!-- Tabla de Ventas -->
+      <div class="bg-white p-5 rounded-lg border shadow-sm">
+        <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-4">
+          <h2 class="text-lg font-bold text-gray-800">Historial de Ventas Registradas</h2>
+          <div class="flex gap-2">
+            <button onclick="cargarHistorialVentas()" class="text-sm bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1.5 rounded border">
+              🔄 Actualizar
+            </button>
+            <button onclick="vaciarVentas()" class="text-sm bg-red-100 hover:bg-red-200 text-red-700 px-3 py-1.5 rounded border border-red-300 font-semibold">
+              🗑️ Vaciar Historial
+            </button>
+          </div>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full border-collapse border border-gray-300 text-sm">
+            <thead>
+              <tr class="bg-gray-100 text-left">
+                <th class="border p-2 text-center">ID Venta</th>
+                <th class="border p-2">Fecha y Hora</th>
+                <th class="border p-2">Detalle de Productos</th>
+                <th class="border p-2 text-center">Método de Pago</th>
+                <th class="border p-2 text-center">Monto Total</th>
+              </tr>
+            </thead>
+            <tbody id="tablaVentas"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Modal de Edición -->
+  <div id="modalEdit" class="fixed inset-0 bg-black bg-opacity-50 hidden flex items-center justify-center p-4">
+    <div class="bg-white p-6 rounded-lg max-w-md w-full space-y-4 shadow-xl">
+      <h3 class="text-lg font-bold text-gray-800">Editar Producto</h3>
+      <input id="editId" type="hidden">
+      <div>
+        <label class="text-xs font-bold text-gray-600">Nombre:</label>
+        <input id="editNombre" type="text" class="w-full p-2 border rounded">
+      </div>
+      <div class="grid grid-cols-2 gap-2">
+        <div>
+          <label class="text-xs font-bold text-gray-600">Costo:</label>
+          <input id="editCosto" type="number" class="w-full p-2 border rounded">
+        </div>
+        <div>
+          <label class="text-xs font-bold text-gray-600">Precio:</label>
+          <input id="editPrecio" type="number" class="w-full p-2 border rounded">
+        </div>
+      </div>
+      <div class="grid grid-cols-2 gap-2">
+        <div>
+          <label class="text-xs font-bold text-gray-600">Stock:</label>
+          <input id="editStock" type="number" class="w-full p-2 border rounded">
+        </div>
+        <div>
+          <label class="text-xs font-bold text-gray-600">Código Barras:</label>
+          <input id="editCodigo" type="text" class="w-full p-2 border rounded">
+        </div>
+      </div>
+      <div class="flex justify-end gap-2 pt-2">
+        <button onclick="cerrarModal()" class="px-4 py-2 border rounded text-gray-600 hover:bg-gray-100">Cancelar</button>
+        <button onclick="guardarEdicion()" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">Guardar Cambios</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let listaProductos = [];
+
+    function cambiarTab(tab) {
+      const secInventario = document.getElementById('seccionInventario');
+      const secVentas = document.getElementById('seccionVentas');
+      const btnInventario = document.getElementById('btnTabInventario');
+      const btnVentas = document.getElementById('btnTabVentas');
+
+      if (tab === 'inventario') {
+        secInventario.classList.remove('hidden');
+        secVentas.classList.add('hidden');
+        btnInventario.className = "pb-3 px-6 font-bold border-b-4 border-blue-600 text-blue-600 focus:outline-none transition-colors";
+        btnVentas.className = "pb-3 px-6 font-bold border-b-4 border-transparent text-gray-500 hover:text-blue-600 focus:outline-none transition-colors";
+      } else {
+        secInventario.classList.add('hidden');
+        secVentas.classList.remove('hidden');
+        btnVentas.className = "pb-3 px-6 font-bold border-b-4 border-blue-600 text-blue-600 focus:outline-none transition-colors";
+        btnInventario.className = "pb-3 px-6 font-bold border-b-4 border-transparent text-gray-500 hover:text-blue-600 focus:outline-none transition-colors";
+        cargarHistorialVentas();
+      }
+    }
+
+    async function cargarProductos() {
+      try {
+        const res = await fetch('/api/productos');
+        listaProductos = await res.json();
+
+        const tbody = document.getElementById('tablaProductos');
+        tbody.innerHTML = '';
+        
+        const select = document.getElementById('selectProducto');
+        select.innerHTML = '<option value="">Seleccionar Producto...</option>';
+
+        listaProductos.forEach(p => {
+          tbody.innerHTML += `
+            <tr>
+              <td class="border p-2 text-center">${p.id}</td>
+              <td class="border p-2 text-gray-500">${p.codigo_barras || '-'}</td>
+              <td class="border p-2 font-medium">${p.nombre}</td>
+              <td class="border p-2 text-center text-gray-600">$${p.costo}</td>
+              <td class="border p-2 text-center font-bold">$${p.precio}</td>
+              <td class="border p-2 text-center font-bold">${p.stock}</td>
+              <td class="border p-2 text-center ${p.alerta_stock ? 'bg-red-200 text-red-800 font-bold' : 'bg-green-100 text-green-800'}">
+                ${p.alerta_stock ? '¡REPONER!' : 'OK'}
+              </td>
+              <td class="border p-2 text-center space-x-1">
+                <button onclick="abrirModal(${p.id})" title="Editar" class="p-1 bg-yellow-100 text-yellow-800 rounded hover:bg-yellow-200">✏️</button>
+                <button onclick="eliminarProducto(${p.id})" title="Eliminar" class="p-1 bg-red-100 text-red-800 rounded hover:bg-red-200">🗑️</button>
+              </td>
+            </tr>
+          `;
+
+          select.innerHTML += `<option value="${p.id}">${p.nombre} ($${p.precio}) - Stock: ${p.stock}</option>`;
+        });
+      } catch (err) {
+        console.error('Error al cargar productos:', err);
+      }
+    }
+
+    async function cargarHistorialVentas() {
+      try {
+        const res = await fetch('/api/ventas');
+        const ventas = await res.json();
+
+        const tbody = document.getElementById('tablaVentas');
+        tbody.innerHTML = '';
+
+        let totalGral = 0;
+        let totalEfectivo = 0;
+        let totalMP = 0;
+        let totalTransf = 0;
+
+        if (!ventas || ventas.length === 0) {
+          tbody.innerHTML = `<tr><td colspan="5" class="border p-4 text-center text-gray-500">No hay ventas registradas aún.</td></tr>`;
+        } else {
+          ventas.forEach(v => {
+            const monto = v.total || 0;
+            totalGral += monto;
+
+            if (v.metodo_pago === 'EFECTIVO') totalEfectivo += monto;
+            else if (v.metodo_pago === 'MERCADO_PAGO') totalMP += monto;
+            else if (v.metodo_pago === 'TRANSFERENCIA') totalTransf += monto;
+
+            const fechaObj = new Date(v.fecha);
+            const fechaStr = isNaN(fechaObj) ? v.fecha : fechaObj.toLocaleString('es-AR');
+
+            tbody.innerHTML += `
+              <tr class="hover:bg-gray-50">
+                <td class="border p-2 text-center font-semibold text-gray-600">#${v.id}</td>
+                <td class="border p-2 text-gray-600">${fechaStr}</td>
+                <td class="border p-2 font-medium">${v.items_detalle || 'Producto sin nombre'}</td>
+                <td class="border p-2 text-center">
+                  <span class="px-2 py-1 rounded text-xs font-bold ${getBadgeMetodoPago(v.metodo_pago)}">
+                    ${v.metodo_pago || 'EFECTIVO'}
+                  </span>
+                </td>
+                <td class="border p-2 text-center font-bold text-gray-800">$${monto}</td>
+              </tr>
+            `;
+          });
+        }
+
+        document.getElementById('totalRecaudado').innerText = `$${totalGral}`;
+        document.getElementById('totalEfectivo').innerText = `$${totalEfectivo}`;
+        document.getElementById('totalMercadoPago').innerText = `$${totalMP}`;
+        document.getElementById('totalTransferencia').innerText = `$${totalTransf}`;
+
+      } catch (err) {
+        console.error('Error al cargar ventas:', err);
+      }
+    }
+
+    function getBadgeMetodoPago(metodo) {
+      switch (metodo) {
+        case 'EFECTIVO': return 'bg-emerald-100 text-emerald-800';
+        case 'MERCADO_PAGO': return 'bg-blue-100 text-blue-800';
+        case 'TRANSFERENCIA': return 'bg-purple-100 text-purple-800';
+        default: return 'bg-gray-100 text-gray-800';
+      }
+    }
+
+    async function vaciarVentas() {
+      const confirmacion = confirm('¿Estás seguro de que deseas borrar TODO el historial de ventas y reiniciar las cuentas a $0? Esta acción no se puede deshacer.');
+      if (!confirmacion) return;
+
+      try {
+        const res = await fetch('/api/ventas/reset', { method: 'DELETE' });
+        if (res.ok) {
+          alert('Historial de ventas borrado con éxito.');
+          cargarHistorialVentas();
+        } else {
+          alert('Error al vaciar el historial.');
+        }
+      } catch (err) {
+        alert('Error de red: ' + err.message);
+      }
+    }
+
+    async function guardarProducto() {
+      const producto = {
+        nombre: document.getElementById('nombre').value,
+        costo: Number(document.getElementById('costo').value),
+        precio: Number(document.getElementById('precio').value),
+        stock: Number(document.getElementById('stock').value),
+        codigo_barras: document.getElementById('codigo_barras').value
+      };
+
+      if (!producto.nombre || !producto.precio) return alert('Ingresa nombre y precio');
+
+      const res = await fetch('/api/productos', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(producto)
+      });
+
+      if (res.ok) {
+        document.getElementById('nombre').value = '';
+        document.getElementById('costo').value = '';
+        document.getElementById('precio').value = '';
+        document.getElementById('stock').value = '';
+        document.getElementById('codigo_barras').value = '';
+        cargarProductos();
+      } else {
+        alert('Error al guardar el producto');
+      }
+    }
+
+    function abrirModal(id) {
+      const p = listaProductos.find(item => item.id === id);
+      if (!p) return;
+
+      document.getElementById('editId').value = p.id;
+      document.getElementById('editNombre').value = p.nombre;
+      document.getElementById('editCosto').value = p.costo;
+      document.getElementById('editPrecio').value = p.precio;
+      document.getElementById('editStock').value = p.stock;
+      document.getElementById('editCodigo').value = p.codigo_barras || '';
+
+      document.getElementById('modalEdit').classList.remove('hidden');
+    }
+
+    function cerrarModal() {
+      document.getElementById('modalEdit').classList.add('hidden');
+    }
+
+    async function guardarEdicion() {
+      const id = document.getElementById('editId').value;
+      const producto = {
+        nombre: document.getElementById('editNombre').value,
+        costo: Number(document.getElementById('editCosto').value),
+        precio: Number(document.getElementById('editPrecio').value),
+        stock: Number(document.getElementById('editStock').value),
+        codigo_barras: document.getElementById('editCodigo').value
+      };
+
+      await fetch(`/api/productos/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(producto)
+      });
+
+      cerrarModal();
+      cargarProductos();
+    }
+
+    async function eliminarProducto(id) {
+      if (!confirm('¿Seguro deseas eliminar este producto?')) return;
+      await fetch(`/api/productos/${id}`, { method: 'DELETE' });
+      cargarProductos();
+    }
+
+    async function registrarVenta() {
+      try {
+        const productoId = Number(document.getElementById('selectProducto').value);
+        const cantidad = Number(document.getElementById('cantVenta').value);
+        const metodo_pago = document.getElementById('metodoPago').value;
+
+        if (!productoId || cantidad <= 0) {
+          return alert('Por favor selecciona un producto y una cantidad válida.');
+        }
+
+        const prod = listaProductos.find(p => p.id === productoId);
+        if (!prod) {
+          return alert('Producto no encontrado.');
+        }
+
+        if (cantidad > prod.stock) {
+          return alert(`¡Stock insuficiente! Quedan ${prod.stock} unidades.`);
+        }
+
+        const res = await fetch('/api/ventas', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            metodo_pago,
+            items: [{ producto_id: productoId, cantidad, precio_unitario: prod.precio }]
+          })
+        });
+
+        if (res.ok) {
+          alert('¡Venta registrada con éxito!');
+          document.getElementById('cantVenta').value = 1;
+          cargarProductos();
+        } else {
+          const err = await res.json();
+          alert('Error del servidor: ' + (err.error || 'No se pudo guardar la venta'));
+        }
+      } catch (error) {
+        alert('Error de red: ' + error.message);
+      }
+    }
+
+    function limpiarNumero(val) {
+      if (!val) return 0;
+      const limpio = val.toString().replace(/[^0-9.-]/g, '');
+      return Number(limpio) || 0;
+    }
+
+    function importarCSV(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = async (e) => {
+        try {
+          const lineas = e.target.result.split(/\r?\n/);
+          const productos = [];
+
+          for (let i = 1; i < lineas.length; i++) {
+            const linea = lineas[i].trim();
+            if (!linea) continue;
+
+            const separador = linea.includes(';') ? ';' : ',';
+            const cols = linea.split(separador);
+
+            if (cols.length >= 4) {
+              const nombre = cols[0].replace(/"/g, '').trim();
+              const costo = limpiarNumero(cols[1]);
+              const precio = limpiarNumero(cols[2]);
+              const stock = limpiarNumero(cols[3]);
+              const codigo_barras = cols[4] ? cols[4].replace(/"/g, '').trim() : '';
+
+              if (nombre) {
+                productos.push({ nombre, costo, precio, stock, codigo_barras });
+              }
+            }
+          }
+
+          if (productos.length === 0) {
+            return alert('No se encontraron productos válidos en el archivo.');
+          }
+
+          const res = await fetch('/api/productos/bulk', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ productos })
+          });
+
+          if (res.ok) {
+            alert(`¡Se importaron/actualizaron ${productos.length} productos correctamente!`);
+            cargarProductos();
+          } else {
+            const err = await res.json();
+            alert('Error en el servidor: ' + (err.error || 'No se pudo guardar'));
+          }
+        } catch (err) {
+          alert('Error al procesar el archivo: ' + err.message);
+        }
+      };
+      reader.readAsText(file);
+    }
+
+    cargarProductos();
+  </script>
+</body>
+</html>
