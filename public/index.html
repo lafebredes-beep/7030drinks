@@ -23,8 +23,8 @@
       <!-- Registrar Venta -->
       <div class="p-5 bg-white border border-blue-200 rounded-lg shadow-sm">
         <h2 class="text-lg font-bold mb-3 text-blue-900">Registrar Venta Rápida</h2>
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
-          <select id="selectProducto" class="p-2.5 border rounded-lg w-full bg-gray-50">
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-3">
+          <select id="selectProducto" class="p-2.5 border rounded-lg w-full bg-gray-50 md:col-span-2">
             <option value="">Seleccionar Producto o Combo...</option>
           </select>
           <input id="cantVenta" type="number" placeholder="Cantidad" value="1" min="1" class="p-2.5 border rounded-lg w-full">
@@ -34,7 +34,13 @@
             <option value="TRANSFERENCIA">Transferencia</option>
           </select>
         </div>
-        <button onclick="registrarVenta()" class="mt-4 bg-blue-600 text-white font-semibold px-5 py-2.5 rounded-lg hover:bg-blue-700">Confirmar Venta</button>
+        <div class="flex flex-wrap items-center justify-between gap-3 mt-4">
+          <div class="flex items-center gap-2">
+            <label class="text-sm font-semibold text-gray-700">Vendedor/Turno:</label>
+            <input id="vendedor" type="text" placeholder="Ej. Mariano, Turno Noche" value="Mariano" class="p-2 border rounded-lg text-sm bg-gray-50 w-52">
+          </div>
+          <button onclick="registrarVenta()" class="bg-blue-600 text-white font-semibold px-6 py-2.5 rounded-lg hover:bg-blue-700">Confirmar Venta</button>
+        </div>
       </div>
 
       <!-- Crear Combos Dinámicos -->
@@ -94,8 +100,9 @@
               <tr class="bg-gray-100 text-left">
                 <th class="border p-2 text-center">Tipo</th>
                 <th class="border p-2">Producto / Combo</th>
+                <th class="border p-2 text-center">Costo Est.</th>
                 <th class="border p-2 text-center">Precio</th>
-                <th class="border p-2 text-center">Stock Disponible</th>
+                <th class="border p-2 text-center">Stock Disp.</th>
                 <th class="border p-2 text-center">Estado</th>
                 <th class="border p-2 text-center">Acciones</th>
               </tr>
@@ -141,6 +148,7 @@
               <tr class="bg-gray-100 text-left">
                 <th class="border p-2 text-center">ID</th>
                 <th class="border p-2">Fecha y Hora</th>
+                <th class="border p-2">Vendedor</th>
                 <th class="border p-2">Detalle</th>
                 <th class="border p-2 text-center">Pago</th>
                 <th class="border p-2 text-center">Total</th>
@@ -184,7 +192,7 @@
           combo2.innerHTML += `<option value="${p.id}">${p.nombre} (Stock: ${p.stock})</option>`;
         }
 
-        select.innerHTML += `<option value="${p.id}">${p.nombre} ($${p.precio}) - Disponibles: ${p.stock}</option>`;
+        select.innerHTML += `<option value="${p.id}">${p.nombre} ($${p.precio}) ${p.es_combo ? '[COMBO]' : '- Stock: ' + p.stock}</option>`;
 
         tbody.innerHTML += `
           <tr class="hover:bg-gray-50">
@@ -195,8 +203,9 @@
               ${p.nombre}
               ${p.componentes_txt ? `<br><span class="text-xs text-amber-700 font-normal">Incluye: ${p.componentes_txt}</span>` : ''}
             </td>
+            <td class="border p-2 text-center text-gray-500">$${p.costo || 0}</td>
             <td class="border p-2 text-center font-bold">$${p.precio}</td>
-            <td class="border p-2 text-center font-bold text-gray-700">${p.stock}</td>
+            <td class="border p-2 text-center font-bold text-gray-700">${p.es_combo ? '-' : p.stock}</td>
             <td class="border p-2 text-center font-bold ${p.alerta_stock ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}">
               ${p.alerta_stock ? 'SIN STOCK / REPONER' : 'DISPONIBLE'}
             </td>
@@ -256,31 +265,24 @@
         codigo_barras: document.getElementById('codigo_barras').value
       };
 
-      if (!p.nombre || !p.precio) return alert('Ingresa nombre y precio');
+      if (!p.nombre || !p.precio) return alert('Ingresa nombre y precio válidos');
 
-      if (editandoId) {
-        // Modo Edición
-        await fetch(`/api/productos/${editandoId}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(p)
-        });
+      const url = editandoId ? `/api/productos/${editandoId}` : '/api/productos';
+      const method = editandoId ? 'PUT' : 'POST';
+
+      const res = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(p)
+      });
+
+      if (res.ok) {
         cancelarEdicion();
+        cargarProductos();
       } else {
-        // Modo Nuevo
-        await fetch('/api/productos', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(p)
-        });
-        document.getElementById('nombre').value = '';
-        document.getElementById('costo').value = '';
-        document.getElementById('precio').value = '';
-        document.getElementById('stock').value = '';
-        document.getElementById('codigo_barras').value = '';
+        const err = await res.json();
+        alert('Error: ' + err.error);
       }
-
-      cargarProductos();
     }
 
     async function guardarCombo() {
@@ -307,6 +309,9 @@
         document.getElementById('comboNombre').value = '';
         document.getElementById('comboPrecio').value = '';
         cargarProductos();
+      } else {
+        const err = await res.json();
+        alert('Error: ' + err.error);
       }
     }
 
@@ -342,9 +347,7 @@
           }
         }
 
-        if (productos.length === 0) {
-          return alert('No se encontraron productos válidos en el archivo CSV.');
-        }
+        if (productos.length === 0) return alert('No se encontraron productos válidos.');
 
         const res = await fetch('/api/productos/bulk', {
           method: 'POST',
@@ -369,13 +372,14 @@
       const producto_id = Number(document.getElementById('selectProducto').value);
       const cantidad = Number(document.getElementById('cantVenta').value);
       const metodo_pago = document.getElementById('metodoPago').value;
+      const vendedor = document.getElementById('vendedor').value;
 
       if (!producto_id) return alert('Selecciona un producto o combo');
 
       const res = await fetch('/api/ventas', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ producto_id, cantidad, metodo_pago })
+        body: JSON.stringify({ producto_id, cantidad, metodo_pago, vendedor })
       });
 
       if (res.ok) {
@@ -383,7 +387,7 @@
         cargarProductos();
       } else {
         const err = await res.json();
-        alert('Error: ' + err.error);
+        alert('❌ Error: ' + err.error);
       }
     }
 
@@ -406,6 +410,7 @@
           <tr>
             <td class="border p-2 text-center font-semibold">#${v.id}</td>
             <td class="border p-2">${new Date(v.fecha).toLocaleString('es-AR')}</td>
+            <td class="border p-2 text-gray-700 font-medium">${v.vendedor || 'General'}</td>
             <td class="border p-2 font-medium">${v.items_detalle || 'Detalle no disponible'}</td>
             <td class="border p-2 text-center font-bold text-xs">${v.metodo_pago}</td>
             <td class="border p-2 text-center font-bold">$${monto}</td>
@@ -420,13 +425,15 @@
     }
 
     async function vaciarVentas() {
-      if (!confirm('¿Deseas reiniciar las ventas a $0?')) return;
-      await fetch('/api/ventas/reset', { method: 'DELETE' });
+      if (!confirm('⚠️ ¿Seguro que deseas reiniciar las ventas a $0?\nSe creará una copia de seguridad automática antes de borrar.')) return;
+      const res = await fetch('/api/ventas/reset', { method: 'DELETE' });
+      const data = await res.json();
+      alert(data.message);
       cargarHistorialVentas();
     }
 
     async function eliminarProducto(id) {
-      if (!confirm('¿Eliminar este ítem?')) return;
+      if (!confirm('¿Deseas dar de baja este producto? (Se ocultará pero no afectará a las ventas pasadas)')) return;
       await fetch(`/api/productos/${id}`, { method: 'DELETE' });
       cargarProductos();
     }
