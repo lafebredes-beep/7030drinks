@@ -1,0 +1,535 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Control de Stock y Ventas - 70/30 Drinks</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🍹</text></svg>">
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 p-3 md:p-6 text-gray-800">
+  <div class="max-w-6xl mx-auto space-y-6">
+    
+    <!-- Encabezado / Tabs -->
+    <div class="bg-white p-4 md:p-6 rounded-lg shadow">
+      <h1 class="text-2xl md:text-3xl font-bold text-center text-gray-800 mb-4">70/30 Drinks - Sistema de Control</h1>
+      <div class="flex justify-center border-b border-gray-200 space-x-2 md:space-x-4">
+        <button id="btnTabInventario" onclick="cambiarTab('inventario')" class="pb-2 md:pb-3 px-4 md:px-6 font-bold border-b-4 border-blue-600 text-blue-600 text-sm md:text-base">📦 Inventario y Ventas</button>
+        <button id="btnTabVentas" onclick="cambiarTab('ventas')" class="pb-2 md:pb-3 px-4 md:px-6 font-bold border-b-4 border-transparent text-gray-500 hover:text-blue-600 text-sm md:text-base">📊 Historial de Ventas</button>
+      </div>
+    </div>
+
+    <!-- PESTAÑA INVENTARIO -->
+    <div id="seccionInventario" class="space-y-6">
+      
+      <!-- Registrar Venta -->
+      <div class="p-4 md:p-5 bg-white border border-blue-200 rounded-lg shadow-sm">
+        <h2 class="text-lg font-bold mb-3 text-blue-900">Registrar Venta Rápida</h2>
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-3">
+          <select id="selectProducto" class="p-2.5 border rounded-lg w-full bg-gray-50 md:col-span-2">
+            <option value="">Cargando productos...</option>
+          </select>
+          <input id="cantVenta" type="number" placeholder="Cantidad" value="1" min="1" class="p-2.5 border rounded-lg w-full">
+          <select id="metodoPago" class="p-2.5 border rounded-lg w-full bg-gray-50">
+            <option value="EFECTIVO">Efectivo</option>
+            <option value="MERCADO_PAGO">Mercado Pago</option>
+            <option value="TRANSFERENCIA">Transferencia</option>
+          </select>
+        </div>
+        <div class="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 mt-4">
+          <div class="flex items-center gap-2">
+            <label class="text-sm font-semibold text-gray-700 whitespace-nowrap">Vendedor / Turno:</label>
+            <input id="vendedor" type="text" placeholder="Ej. Turno Noche" class="p-2 border rounded-lg text-sm bg-gray-50 w-full md:w-52">
+          </div>
+          <button id="btnConfirmarVenta" onclick="registrarVenta()" class="bg-blue-600 text-white font-semibold px-6 py-2.5 rounded-lg hover:bg-blue-700 transition-colors">Confirmar Venta</button>
+        </div>
+      </div>
+
+      <!-- Crear Combos Dinámicos -->
+      <div class="p-4 md:p-5 bg-amber-50 border border-amber-200 rounded-lg shadow-sm space-y-3">
+        <h2 class="text-lg font-bold text-amber-900">🔥 Armar Nuevo Combo / Promoción</h2>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <input id="comboNombre" type="text" placeholder="Nombre Combo (ej. Fernet + Coca)" class="p-2 border rounded bg-white">
+          <input id="comboPrecio" type="number" placeholder="Precio Promocional ($)" class="p-2 border rounded bg-white">
+          <button id="btnGuardarCombo" onclick="guardarCombo()" class="bg-amber-600 text-white font-semibold px-4 py-2 rounded hover:bg-amber-700 transition-colors">Guardar Combo</button>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3 pt-2">
+          <div class="p-3 bg-white border rounded">
+            <label class="text-xs font-bold text-gray-600 block mb-1">Componente 1:</label>
+            <div class="flex gap-2">
+              <select id="comboIng1" class="p-1.5 border rounded w-full text-sm"></select>
+              <input id="comboCant1" type="number" value="1" min="1" class="p-1.5 border rounded w-20 text-sm" placeholder="Cant.">
+            </div>
+          </div>
+          <div class="p-3 bg-white border rounded">
+            <label class="text-xs font-bold text-gray-600 block mb-1">Componente 2 (Opcional):</label>
+            <div class="flex gap-2">
+              <select id="comboIng2" class="p-1.5 border rounded w-full text-sm"></select>
+              <input id="comboCant2" type="number" value="1" min="1" class="p-1.5 border rounded w-20 text-sm" placeholder="Cant.">
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Cargar / Editar Productos Individuales -->
+      <div class="p-4 md:p-5 bg-white rounded-lg border shadow-sm space-y-4">
+        <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-2">
+          <h2 id="tituloFormProducto" class="text-lg font-bold text-gray-800">Cargar / Importar Productos Sueltos</h2>
+          <label class="bg-purple-600 text-white px-4 py-2 rounded-lg cursor-pointer hover:bg-purple-700 text-sm font-medium transition-colors">
+            📁 Importar desde CSV
+            <input type="file" id="inputCSV" accept=".csv" class="hidden" onchange="importarCSV(event)">
+          </label>
+        </div>
+        <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-6 gap-2">
+          <input id="nombre" type="text" placeholder="Nombre" class="p-2 border rounded sm:col-span-2">
+          <input id="costo" type="number" placeholder="Costo" class="p-2 border rounded">
+          <input id="precio" type="number" placeholder="Precio" class="p-2 border rounded">
+          <input id="stock" type="number" placeholder="Stock" class="p-2 border rounded">
+          <input id="codigo_barras" type="text" placeholder="Cód. Barras" class="p-2 border rounded">
+        </div>
+        <div class="flex gap-2">
+          <button id="btnGuardarProd" onclick="guardarProducto()" class="bg-green-600 text-white font-medium px-4 py-2 rounded hover:bg-green-700 transition-colors">Guardar Producto</button>
+          <button id="btnCancelarEdit" onclick="cancelarEdicion()" class="bg-gray-400 text-white font-medium px-4 py-2 rounded hover:bg-gray-500 hidden transition-colors">Cancelar Edición</button>
+        </div>
+      </div>
+
+      <!-- Tabla Inventario -->
+      <div class="bg-white p-4 md:p-5 rounded-lg border shadow-sm space-y-3">
+        <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+          <h2 class="text-lg font-bold text-gray-800">Inventario y Combos</h2>
+          <input id="buscadorInventario" type="text" oninput="filtrarProductos()" placeholder="🔍 Buscar producto..." class="p-1.5 border rounded-lg text-sm w-full sm:w-64">
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full border-collapse border border-gray-300 text-sm min-w-[600px]">
+            <thead>
+              <tr class="bg-gray-100 text-left">
+                <th class="border p-2 text-center">Tipo</th>
+                <th class="border p-2">Producto / Combo</th>
+                <th class="border p-2 text-center">Costo Est.</th>
+                <th class="border p-2 text-center">Precio</th>
+                <th class="border p-2 text-center">Stock Disp.</th>
+                <th class="border p-2 text-center">Estado</th>
+                <th class="border p-2 text-center">Acciones</th>
+              </tr>
+            </thead>
+            <tbody id="tablaProductos"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- PESTAÑA HISTORIAL -->
+    <div id="seccionVentas" class="space-y-6 hidden">
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
+        <div class="bg-white p-3 md:p-4 rounded-lg border border-l-4 border-l-green-500">
+          <span class="text-xs font-bold text-gray-500 uppercase">Total Recaudado</span>
+          <p id="totalRecaudado" class="text-xl md:text-2xl font-bold text-gray-800">$0</p>
+        </div>
+        <div class="bg-white p-3 md:p-4 rounded-lg border border-l-4 border-l-emerald-500">
+          <span class="text-xs font-bold text-gray-500 uppercase">Efectivo</span>
+          <p id="totalEfectivo" class="text-xl md:text-2xl font-bold text-emerald-600">$0</p>
+        </div>
+        <div class="bg-white p-3 md:p-4 rounded-lg border border-l-4 border-l-blue-500">
+          <span class="text-xs font-bold text-gray-500 uppercase">Mercado Pago</span>
+          <p id="totalMercadoPago" class="text-xl md:text-2xl font-bold text-blue-600">$0</p>
+        </div>
+        <div class="bg-white p-3 md:p-4 rounded-lg border border-l-4 border-l-purple-500">
+          <span class="text-xs font-bold text-gray-500 uppercase">Transferencia</span>
+          <p id="totalTransferencia" class="text-xl md:text-2xl font-bold text-purple-600">$0</p>
+        </div>
+      </div>
+
+      <div class="bg-white p-4 md:p-5 rounded-lg border shadow-sm">
+        <div class="flex justify-between items-center mb-4">
+          <h2 class="text-lg font-bold text-gray-800">Historial de Ventas</h2>
+          <div class="flex gap-2">
+            <button onclick="cargarHistorialVentas()" class="text-sm bg-gray-100 hover:bg-gray-200 px-3 py-1.5 rounded border">🔄 Actualizar</button>
+            <button onclick="vaciarVentas()" class="text-sm bg-red-100 hover:bg-red-200 text-red-700 px-3 py-1.5 rounded border border-red-300 font-semibold">🗑️ Vaciar Historial</button>
+          </div>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full border-collapse border border-gray-300 text-sm min-w-[600px]">
+            <thead>
+              <tr class="bg-gray-100 text-left">
+                <th class="border p-2 text-center">ID</th>
+                <th class="border p-2">Fecha y Hora</th>
+                <th class="border p-2">Vendedor</th>
+                <th class="border p-2">Detalle</th>
+                <th class="border p-2 text-center">Pago</th>
+                <th class="border p-2 text-center">Total</th>
+              </tr>
+            </thead>
+            <tbody id="tablaVentas"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <script>
+    let listaProductos = [];
+    let editandoId = null;
+
+    // Función de saneamiento contra vulnerabilidades XSS
+    function escapeHTML(str) {
+      if (str === null || str === undefined) return '';
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+    }
+
+    function cambiarTab(tab) {
+      document.getElementById('seccionInventario').classList.toggle('hidden', tab !== 'inventario');
+      document.getElementById('seccionVentas').classList.toggle('hidden', tab !== 'ventas');
+      
+      const btnInv = document.getElementById('btnTabInventario');
+      const btnVen = document.getElementById('btnTabVentas');
+
+      if (tab === 'inventario') {
+        btnInv.className = "pb-2 md:pb-3 px-4 md:px-6 font-bold border-b-4 border-blue-600 text-blue-600 text-sm md:text-base";
+        btnVen.className = "pb-2 md:pb-3 px-4 md:px-6 font-bold border-b-4 border-transparent text-gray-500 hover:text-blue-600 text-sm md:text-base";
+      } else {
+        btnVen.className = "pb-2 md:pb-3 px-4 md:px-6 font-bold border-b-4 border-blue-600 text-blue-600 text-sm md:text-base";
+        btnInv.className = "pb-2 md:pb-3 px-4 md:px-6 font-bold border-b-4 border-transparent text-gray-500 hover:text-blue-600 text-sm md:text-base";
+        cargarHistorialVentas();
+      }
+    }
+
+    async function cargarProductos() {
+      try {
+        const res = await fetch('/api/productos');
+        listaProductos = await res.json();
+
+        const select = document.getElementById('selectProducto');
+        const combo1 = document.getElementById('comboIng1');
+        const combo2 = document.getElementById('comboIng2');
+
+        select.innerHTML = '<option value="">Seleccionar Producto o Combo...</option>';
+        combo1.innerHTML = '<option value="">Seleccionar Botella/Bebida...</option>';
+        combo2.innerHTML = '<option value="">Ninguno</option>';
+
+        listaProductos.forEach(p => {
+          const nombreEsc = escapeHTML(p.nombre);
+          if (p.es_combo === 0) {
+            combo1.innerHTML += `<option value="${p.id}">${nombreEsc} (Stock: ${p.stock})</option>`;
+            combo2.innerHTML += `<option value="${p.id}">${nombreEsc} (Stock: ${p.stock})</option>`;
+          }
+
+          select.innerHTML += `<option value="${p.id}">${nombreEsc} ($${p.precio}) ${p.es_combo ? '[COMBO]' : '- Stock: ' + p.stock}</option>`;
+        });
+
+        renderizarTablaProductos(listaProductos);
+      } catch (err) {
+        console.error('Error al cargar productos:', err);
+      }
+    }
+
+    function renderizarTablaProductos(productos) {
+      const tbody = document.getElementById('tablaProductos');
+      tbody.innerHTML = '';
+
+      if (productos.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="7" class="border p-4 text-center text-gray-500">No se encontraron productos registradas.</td></tr>';
+        return;
+      }
+
+      productos.forEach(p => {
+        const nombreEsc = escapeHTML(p.nombre);
+        const componentesEsc = escapeHTML(p.componentes_txt);
+
+        tbody.innerHTML += `
+          <tr class="hover:bg-gray-50">
+            <td class="border p-2 text-center font-bold">
+              ${p.es_combo ? '<span class="bg-amber-100 text-amber-800 text-xs px-2 py-1 rounded">COMBO</span>' : '<span class="bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded">SUELTO</span>'}
+            </td>
+            <td class="border p-2 font-medium">
+              ${nombreEsc}
+              ${componentesEsc ? `<br><span class="text-xs text-amber-700 font-normal">Incluye: ${componentesEsc}</span>` : ''}
+            </td>
+            <td class="border p-2 text-center text-gray-500">$${p.costo || 0}</td>
+            <td class="border p-2 text-center font-bold">$${p.precio}</td>
+            <td class="border p-2 text-center font-bold text-gray-700">${p.es_combo ? '-' : p.stock}</td>
+            <td class="border p-2 text-center font-bold ${p.alerta_stock ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}">
+              ${p.alerta_stock ? 'SIN STOCK / REPONER' : 'DISPONIBLE'}
+            </td>
+            <td class="border p-2 text-center space-x-1">
+              ${p.es_combo === 0 ? `<button onclick="prepararEdicion(${p.id})" class="p-1 bg-amber-100 text-amber-800 rounded hover:bg-amber-200" title="Editar">✏️</button>` : ''}
+              <button onclick="eliminarProducto(${p.id})" class="p-1 bg-red-100 text-red-800 rounded hover:bg-red-200" title="Eliminar">🗑️</button>
+            </td>
+          </tr>
+        `;
+      });
+    }
+
+    function filtrarProductos() {
+      const query = document.getElementById('buscadorInventario').value.toLowerCase().trim();
+      const filtrados = listaProductos.filter(p => 
+        p.nombre.toLowerCase().includes(query) || 
+        (p.codigo_barras && p.codigo_barras.toLowerCase().includes(query))
+      );
+      renderizarTablaProductos(filtrados);
+    }
+
+    function prepararEdicion(id) {
+      const prod = listaProductos.find(p => p.id === id);
+      if (!prod) return;
+
+      editandoId = id;
+      document.getElementById('nombre').value = prod.nombre;
+      document.getElementById('costo').value = prod.costo;
+      document.getElementById('precio').value = prod.precio;
+      document.getElementById('stock').value = prod.stock;
+      document.getElementById('codigo_barras').value = prod.codigo_barras || '';
+
+      document.getElementById('tituloFormProducto').innerText = '✏️ Editar Producto Suelto';
+      
+      const btnGuardar = document.getElementById('btnGuardarProd');
+      btnGuardar.innerText = 'Actualizar Producto';
+      btnGuardar.className = 'bg-amber-600 text-white font-medium px-4 py-2 rounded hover:bg-amber-700';
+      
+      document.getElementById('btnCancelarEdit').classList.remove('hidden');
+      window.scrollTo({ top: 300, behavior: 'smooth' });
+    }
+
+    function cancelarEdicion() {
+      editandoId = null;
+      document.getElementById('nombre').value = '';
+      document.getElementById('costo').value = '';
+      document.getElementById('precio').value = '';
+      document.getElementById('stock').value = '';
+      document.getElementById('codigo_barras').value = '';
+
+      document.getElementById('tituloFormProducto').innerText = 'Cargar / Importar Productos Sueltos';
+      
+      const btnGuardar = document.getElementById('btnGuardarProd');
+      btnGuardar.innerText = 'Guardar Producto';
+      btnGuardar.className = 'bg-green-600 text-white font-medium px-4 py-2 rounded hover:bg-green-700';
+
+      document.getElementById('btnCancelarEdit').classList.add('hidden');
+    }
+
+    async function guardarProducto() {
+      const btn = document.getElementById('btnGuardarProd');
+      const p = {
+        nombre: document.getElementById('nombre').value,
+        costo: Number(document.getElementById('costo').value),
+        precio: Number(document.getElementById('precio').value),
+        stock: Number(document.getElementById('stock').value),
+        codigo_barras: document.getElementById('codigo_barras').value
+      };
+
+      if (!p.nombre || isNaN(p.precio) || p.precio <= 0) return alert('Ingresa un nombre y un precio válidos.');
+
+      btn.disabled = true;
+      btn.innerText = 'Procesando...';
+
+      try {
+        const url = editandoId ? `/api/productos/${editandoId}` : '/api/productos';
+        const method = editandoId ? 'PUT' : 'POST';
+
+        const res = await fetch(url, {
+          method,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(p)
+        });
+
+        if (res.ok) {
+          cancelarEdicion();
+          await cargarProductos();
+        } else {
+          const err = await res.json();
+          alert('Error: ' + (err.error || 'No se pudo guardar el producto.'));
+        }
+      } finally {
+        btn.disabled = false;
+        btn.innerText = editandoId ? 'Actualizar Producto' : 'Guardar Producto';
+      }
+    }
+
+    async function guardarCombo() {
+      const btn = document.getElementById('btnGuardarCombo');
+      const nombre = document.getElementById('comboNombre').value;
+      const precio = Number(document.getElementById('comboPrecio').value);
+      const ing1 = Number(document.getElementById('comboIng1').value);
+      const cant1 = Number(document.getElementById('comboCant1').value);
+      const ing2 = Number(document.getElementById('comboIng2').value);
+      const cant2 = Number(document.getElementById('comboCant2').value);
+
+      if (!nombre || !precio || !ing1) return alert('Ingresa el nombre, precio y al menos 1 producto componente.');
+
+      const items = [{ ingrediente_id: ing1, cantidad: cant1 }];
+      if (ing2) items.push({ ingrediente_id: ing2, cantidad: cant2 });
+
+      btn.disabled = true;
+      btn.innerText = 'Guardando...';
+
+      try {
+        const res = await fetch('/api/combos', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ nombre, precio, items })
+        });
+
+        if (res.ok) {
+          alert('¡Combo creado con éxito!');
+          document.getElementById('comboNombre').value = '';
+          document.getElementById('comboPrecio').value = '';
+          await cargarProductos();
+        } else {
+          const err = await res.json();
+          alert('Error: ' + (err.error || 'No se pudo guardar el combo.'));
+        }
+      } finally {
+        btn.disabled = false;
+        btn.innerText = 'Guardar Combo';
+      }
+    }
+
+    function importarCSV(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = async function(e) {
+        const texto = e.target.result;
+        const lineas = texto.split('\n');
+        const productos = [];
+
+        for (let i = 0; i < lineas.length; i++) {
+          const linea = lineas[i].trim();
+          if (!linea) continue;
+
+          if (i === 0 && (linea.toLowerCase().includes('nombre') || linea.toLowerCase().includes('producto'))) {
+            continue;
+          }
+
+          const separador = linea.includes(';') ? ';' : ',';
+          const campos = linea.split(separador);
+
+          if (campos.length >= 2) {
+            productos.push({
+              nombre: campos[0]?.trim().replace(/^"|"$/g, ''),
+              costo: Number(campos[1]?.trim()) || 0,
+              precio: Number(campos[2]?.trim()) || 0,
+              stock: Number(campos[3]?.trim()) || 0,
+              codigo_barras: campos[4]?.trim().replace(/^"|"$/g, '') || ''
+            });
+          }
+        }
+
+        if (productos.length === 0) return alert('No se encontraron productos válidos en el archivo CSV.');
+
+        const res = await fetch('/api/productos/bulk', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ productos })
+        });
+
+        if (res.ok) {
+          alert(`¡Se importaron ${productos.length} productos con éxito!`);
+          cargarProductos();
+        } else {
+          alert('Error al importar productos.');
+        }
+
+        event.target.value = '';
+      };
+
+      reader.readAsText(file);
+    }
+
+    async function registrarVenta() {
+      const btn = document.getElementById('btnConfirmarVenta');
+      const producto_id = Number(document.getElementById('selectProducto').value);
+      const cantidad = Number(document.getElementById('cantVenta').value);
+      const metodo_pago = document.getElementById('metodoPago').value;
+      const vendedor = document.getElementById('vendedor').value;
+
+      if (!producto_id) return alert('Selecciona un producto o combo.');
+
+      btn.disabled = true;
+      btn.innerText = 'Procesando...';
+
+      try {
+        const res = await fetch('/api/ventas', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ producto_id, cantidad, metodo_pago, vendedor })
+        });
+
+        if (res.ok) {
+          alert('¡Venta realizada!');
+          await cargarProductos();
+        } else {
+          const err = await res.json();
+          alert('❌ Error: ' + (err.error || 'No se pudo completar la venta.'));
+        }
+      } finally {
+        btn.disabled = false;
+        btn.innerText = 'Confirmar Venta';
+      }
+    }
+
+    async function cargarHistorialVentas() {
+      try {
+        const res = await fetch('/api/ventas');
+        const ventas = await res.json();
+        const tbody = document.getElementById('tablaVentas');
+        tbody.innerHTML = '';
+
+        let totalGral = 0, ef = 0, mp = 0, tr = 0;
+
+        if (ventas.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="6" class="border p-4 text-center text-gray-500">No hay ventas registradas.</td></tr>';
+        } else {
+          ventas.forEach(v => {
+            const monto = v.total || 0;
+            totalGral += monto;
+            if (v.metodo_pago === 'EFECTIVO') ef += monto;
+            if (v.metodo_pago === 'MERCADO_PAGO') mp += monto;
+            if (v.metodo_pago === 'TRANSFERENCIA') tr += monto;
+
+            tbody.innerHTML += `
+              <tr class="hover:bg-gray-50">
+                <td class="border p-2 text-center font-semibold">#${v.id}</td>
+                <td class="border p-2">${new Date(v.fecha).toLocaleString('es-AR')}</td>
+                <td class="border p-2 text-gray-700 font-medium">${escapeHTML(v.vendedor || 'General')}</td>
+                <td class="border p-2 font-medium">${escapeHTML(v.items_detalle || 'Detalle no disponible')}</td>
+                <td class="border p-2 text-center font-bold text-xs">${escapeHTML(v.metodo_pago)}</td>
+                <td class="border p-2 text-center font-bold">$${monto}</td>
+              </tr>
+            `;
+          });
+        }
+
+        document.getElementById('totalRecaudado').innerText = `$${totalGral}`;
+        document.getElementById('totalEfectivo').innerText = `$${ef}`;
+        document.getElementById('totalMercadoPago').innerText = `$${mp}`;
+        document.getElementById('totalTransferencia').innerText = `$${tr}`;
+      } catch (err) {
+        console.error('Error al obtener ventas:', err);
+      }
+    }
+
+    async function vaciarVentas() {
+      if (!confirm('⚠️ ¿Seguro que deseas reiniciar las ventas?\nSe creará un respaldo en archivo JSON en el servidor antes de borrar.')) return;
+      const res = await fetch('/api/ventas/reset', { method: 'DELETE' });
+      const data = await res.json();
+      alert(data.message || 'Proceso completado.');
+      cargarHistorialVentas();
+    }
+
+    async function eliminarProducto(id) {
+      if (!confirm('¿Deseas dar de baja este producto? (Se ocultará pero no afectará a las ventas pasadas)')) return;
+      await fetch(`/api/productos/${id}`, { method: 'DELETE' });
+      cargarProductos();
+    }
+
+    cargarProductos();
+  </script>
+</body>
+</html>

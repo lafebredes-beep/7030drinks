@@ -10,18 +10,19 @@ const PORT = process.env.PORT || 3000;
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
+// Asegurar existencia del directorio de backups
 const backupsDir = path.join(__dirname, 'backups');
 if (!fs.existsSync(backupsDir)) {
-  fs.mkdirSync(backupsDir);
+  fs.mkdirSync(backupsDir, { recursive: true });
 }
 
-// Conexión a Turso (Nube) o Local
+// Conexión a Turso (Nube) o Base de datos local
 const db = createClient({
   url: process.env.TURSO_DATABASE_URL || 'file:stock7030.db',
   authToken: process.env.TURSO_AUTH_TOKEN
 });
 
-// Funciones de ayuda
+// Funciones auxiliares para queries
 const dbRun = async (sql, params = []) => {
   const res = await db.execute({ sql, args: params });
   return { lastID: Number(res.lastInsertRowid) };
@@ -35,7 +36,7 @@ const dbAll = async (sql, params = []) => {
   return res.rows;
 };
 
-// Crear Tablas automáticamente al iniciar
+// Inicialización de la Base de Datos
 (async () => {
   try {
     await dbRun(`CREATE TABLE IF NOT EXISTS productos (
@@ -79,21 +80,21 @@ app.get('/api/productos', async (req, res) => {
       FROM productos p WHERE p.activo = 1 ORDER BY p.nombre ASC
     `);
     res.json(productos);
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: 'Error al obtener productos.' }); }
 });
 
 app.post('/api/productos', async (req, res) => {
   const { nombre, costo, precio, stock, codigo_barras } = req.body;
-  if (!nombre || !nombre.trim()) return res.status(400).json({ error: 'Nombre obligatorio.' });
-  if (isNaN(precio) || Number(precio) <= 0) return res.status(400).json({ error: 'Precio inválido.' });
+  if (!nombre || !nombre.trim()) return res.status(400).json({ error: 'El nombre es obligatorio.' });
+  if (isNaN(precio) || Number(precio) <= 0) return res.status(400).json({ error: 'El precio debe ser un número mayor a cero.' });
 
   try {
     const result = await dbRun(
       `INSERT INTO productos (nombre, costo, precio, stock, codigo_barras, es_combo, activo) VALUES (?, ?, ?, ?, ?, 0, 1)`,
       [nombre.trim(), Number(costo) || 0, Number(precio), Math.floor(Number(stock)) || 0, codigo_barras || '']
     );
-    res.json({ id: result.lastID, message: 'Producto creado' });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+    res.json({ id: result.lastID, message: 'Producto creado correctamente.' });
+  } catch (err) { res.status(500).json({ error: 'Error al crear producto.' }); }
 });
 
 app.put('/api/productos/:id', async (req, res) => {
@@ -103,19 +104,22 @@ app.put('/api/productos/:id', async (req, res) => {
       `UPDATE productos SET nombre = ?, costo = ?, precio = ?, stock = ?, codigo_barras = ? WHERE id = ?`,
       [nombre.trim(), Number(costo) || 0, Number(precio), Math.floor(Number(stock)), codigo_barras || '', req.params.id]
     );
-    res.json({ message: 'Actualizado' });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+    res.json({ message: 'Producto actualizado.' });
+  } catch (err) { res.status(500).json({ error: 'Error al actualizar producto.' }); }
 });
 
 app.delete('/api/productos/:id', async (req, res) => {
   try {
     await dbRun(`UPDATE productos SET activo = 0 WHERE id = ?`, [req.params.id]);
-    res.json({ message: 'Eliminado (Soft)' });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+    res.json({ message: 'Producto dado de baja.' });
+  } catch (err) { res.status(500).json({ error: 'Error al eliminar producto.' }); }
 });
 
 app.post('/api/productos/bulk', async (req, res) => {
   const { productos } = req.body;
+  if (!Array.isArray(productos) || productos.length === 0) {
+    return res.status(400).json({ error: 'No se enviaron datos válidos.' });
+  }
   try {
     const tx = await db.transaction('write');
     for (const p of productos) {
@@ -127,18 +131,21 @@ app.post('/api/productos/bulk', async (req, res) => {
       }
     }
     await tx.commit();
-    res.json({ message: 'Importados' });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+    res.json({ message: 'Productos importados con éxito.' });
+  } catch (err) { res.status(500).json({ error: 'Error durante la importación masiva.' }); }
 });
 
 app.post('/api/combos', async (req, res) => {
   const { nombre, precio, items } = req.body;
+  if (!nombre || !precio || !Array.isArray(items) || items.length === 0) {
+    return res.status(400).json({ error: 'Faltan datos requeridos para el combo.' });
+  }
   try {
     const tx = await db.transaction('write');
     let costoCalculado = 0;
     for (const item of items) {
       const resIng = await tx.execute({ sql: `SELECT costo FROM productos WHERE id = ?`, args: [item.ingrediente_id] });
-      if (resIng.rows.length > 0) costoCalculado += (resIng.rows[0].costo * Number(item.cantidad));
+      if (resIng.rows.length > 0) costoCalculado += (Number(resIng.rows[0].costo) * Number(item.cantidad));
     }
     const comboRes = await tx.execute({
       sql: `INSERT INTO productos (nombre, costo, precio, stock, es_combo, activo) VALUES (?, ?, ?, 0, 1, 1)`,
@@ -152,19 +159,20 @@ app.post('/api/combos', async (req, res) => {
       });
     }
     await tx.commit();
-    res.json({ id: comboId, message: 'Combo creado' });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+    res.json({ id: comboId, message: 'Combo creado correctamente.' });
+  } catch (err) { res.status(500).json({ error: 'Error al registrar el combo.' }); }
 });
 
 // ================= RUTAS DE VENTAS =================
 app.post('/api/ventas', async (req, res) => {
   const { producto_id, cantidad, metodo_pago, vendedor } = req.body;
   const cant = Math.floor(Number(cantidad));
-  
+  if (!producto_id || cant <= 0) return res.status(400).json({ error: 'Datos de venta inválidos.' });
+
   try {
     const tx = await db.transaction('write');
     const prodRes = await tx.execute({ sql: `SELECT * FROM productos WHERE id = ? AND activo = 1`, args: [producto_id] });
-    if (prodRes.rows.length === 0) { await tx.rollback(); return res.status(404).json({ error: 'Producto inactivo.' }); }
+    if (prodRes.rows.length === 0) { await tx.rollback(); return res.status(404).json({ error: 'Producto no encontrado.' }); }
     const prod = prodRes.rows[0];
 
     if (prod.es_combo === 0) {
@@ -176,7 +184,7 @@ app.post('/api/ventas', async (req, res) => {
         args: [prod.id]
       });
       for (const comp of compRes.rows) {
-        if (comp.stock < (comp.cant_combo * cant)) { await tx.rollback(); return res.status(400).json({ error: 'Stock insuficiente para el combo.' }); }
+        if (comp.stock < (comp.cant_combo * cant)) { await tx.rollback(); return res.status(400).json({ error: 'Stock insuficiente de uno de los componentes del combo.' }); }
       }
       for (const comp of compRes.rows) {
         await tx.execute({ sql: `UPDATE productos SET stock = stock - ? WHERE id = ?`, args: [comp.cant_combo * cant, comp.id] });
@@ -186,7 +194,7 @@ app.post('/api/ventas', async (req, res) => {
     const totalVenta = prod.precio * cant;
     const ventaRes = await tx.execute({
       sql: `INSERT INTO ventas (metodo_pago, vendedor, total) VALUES (?, ?, ?)`,
-      args: [metodo_pago, vendedor || 'General', totalVenta]
+      args: [metodo_pago || 'EFECTIVO', (vendedor && vendedor.trim()) ? vendedor.trim() : 'General', totalVenta]
     });
     
     await tx.execute({
@@ -195,8 +203,8 @@ app.post('/api/ventas', async (req, res) => {
     });
 
     await tx.commit();
-    res.json({ message: 'Venta registrada' });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+    res.json({ message: 'Venta registrada con éxito.' });
+  } catch (err) { res.status(500).json({ error: 'Error al procesar la venta.' }); }
 });
 
 app.get('/api/ventas', async (req, res) => {
@@ -208,17 +216,28 @@ app.get('/api/ventas', async (req, res) => {
       GROUP BY v.id ORDER BY v.fecha DESC
     `);
     res.json(ventas);
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: 'Error al obtener historial.' }); }
 });
 
+// RESPALDO DE VENTAS REAL EN ARCHIVO JSON ANTES DE BORRAR
 app.delete('/api/ventas/reset', async (req, res) => {
   try {
+    const ventas = await dbAll(`SELECT * FROM ventas`);
+    const detalles = await dbAll(`SELECT * FROM ventas_detalle`);
+    
+    const fechaStr = new Date().toISOString().replace(/[:.]/g, '-');
+    const backupFilename = `backup_ventas_${fechaStr}.json`;
+    const backupPath = path.join(backupsDir, backupFilename);
+    
+    fs.writeFileSync(backupPath, JSON.stringify({ fecha: new Date(), ventas, detalles }, null, 2));
+
     const tx = await db.transaction('write');
     await tx.execute('DELETE FROM ventas_detalle');
     await tx.execute('DELETE FROM ventas');
     await tx.commit();
-    res.json({ message: 'Historial vaciado' });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+
+    res.json({ message: `Historial vaciado. Copia guardada en /backups/${backupFilename}` });
+  } catch (err) { res.status(500).json({ error: 'Error durante el proceso de reseteo.' }); }
 });
 
-app.listen(PORT, () => console.log(`Servidor en puerto ${PORT}`));
+app.listen(PORT, () => console.log(`Servidor activo en puerto ${PORT}`));
