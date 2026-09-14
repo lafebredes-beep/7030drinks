@@ -165,46 +165,66 @@ app.post('/api/combos', async (req, res) => {
 
 // ================= RUTAS DE VENTAS =================
 app.post('/api/ventas', async (req, res) => {
-  const { producto_id, cantidad, metodo_pago, vendedor } = req.body;
-  const cant = Math.floor(Number(cantidad));
-  if (!producto_id || cant <= 0) return res.status(400).json({ error: 'Datos de venta inválidos.' });
+  const { carrito, metodo_pago, vendedor } = req.body;
+  
+  if (!Array.isArray(carrito) || carrito.length === 0) {
+    return res.status(400).json({ error: 'El carrito de ventas está vacío.' });
+  }
 
   try {
     const tx = await db.transaction('write');
-    const prodRes = await tx.execute({ sql: `SELECT * FROM productos WHERE id = ? AND activo = 1`, args: [producto_id] });
-    if (prodRes.rows.length === 0) { await tx.rollback(); return res.status(404).json({ error: 'Producto no encontrado.' }); }
-    const prod = prodRes.rows[0];
+    let totalVenta = 0;
 
-    if (prod.es_combo === 0) {
-      if (prod.stock < cant) { await tx.rollback(); return res.status(400).json({ error: 'Stock insuficiente.' }); }
-      await tx.execute({ sql: `UPDATE productos SET stock = stock - ? WHERE id = ?`, args: [cant, prod.id] });
-    } else {
-      const compRes = await tx.execute({
-        sql: `SELECT ci.cantidad as cant_combo, p.id, p.stock FROM combo_items ci JOIN productos p ON ci.ingrediente_id = p.id WHERE ci.combo_id = ?`,
-        args: [prod.id]
-      });
-      for (const comp of compRes.rows) {
-        if (comp.stock < (comp.cant_combo * cant)) { await tx.rollback(); return res.status(400).json({ error: 'Stock insuficiente de uno de los componentes del combo.' }); }
+    for (const item of carrito) {
+      const cant = Math.floor(Number(item.cantidad));
+      if (cant <= 0) { await tx.rollback(); return res.status(400).json({ error: 'Cantidad inválida en el carrito.' }); }
+
+      const prodRes = await tx.execute({ sql: `SELECT * FROM productos WHERE id = ? AND activo = 1`, args: [item.producto_id] });
+      if (prodRes.rows.length === 0) { await tx.rollback(); return res.status(404).json({ error: `Producto no encontrado.` }); }
+      
+      const prod = prodRes.rows[0];
+      totalVenta += prod.precio * cant;
+
+      if (prod.es_combo === 0) {
+        if (prod.stock < cant) { await tx.rollback(); return res.status(400).json({ error: `Stock insuficiente para: ${prod.nombre}.` }); }
+        await tx.execute({ sql: `UPDATE productos SET stock = stock - ? WHERE id = ?`, args: [cant, prod.id] });
+      } else {
+        const compRes = await tx.execute({
+          sql: `SELECT ci.cantidad as cant_combo, p.id, p.stock, p.nombre FROM combo_items ci JOIN productos p ON ci.ingrediente_id = p.id WHERE ci.combo_id = ?`,
+          args: [prod.id]
+        });
+        for (const comp of compRes.rows) {
+          if (comp.stock < (comp.cant_combo * cant)) { 
+            await tx.rollback(); 
+            return res.status(400).json({ error: `Falta stock de ${comp.nombre} para armar el combo ${prod.nombre}.` }); 
+          }
+        }
+        for (const comp of compRes.rows) {
+          await tx.execute({ sql: `UPDATE productos SET stock = stock - ? WHERE id = ?`, args: [comp.cant_combo * cant, comp.id] });
+        }
       }
-      for (const comp of compRes.rows) {
-        await tx.execute({ sql: `UPDATE productos SET stock = stock - ? WHERE id = ?`, args: [comp.cant_combo * cant, comp.id] });
-      }
+      item.precio_unitario = prod.precio; 
     }
 
-    const totalVenta = prod.precio * cant;
     const ventaRes = await tx.execute({
       sql: `INSERT INTO ventas (metodo_pago, vendedor, total) VALUES (?, ?, ?)`,
       args: [metodo_pago || 'EFECTIVO', (vendedor && vendedor.trim()) ? vendedor.trim() : 'General', totalVenta]
     });
+    const ventaId = Number(ventaRes.lastInsertRowid);
     
-    await tx.execute({
-      sql: `INSERT INTO ventas_detalle (venta_id, producto_id, cantidad, precio_unitario) VALUES (?, ?, ?, ?)`,
-      args: [Number(ventaRes.lastInsertRowid), prod.id, cant, prod.precio]
-    });
+    for (const item of carrito) {
+       await tx.execute({
+          sql: `INSERT INTO ventas_detalle (venta_id, producto_id, cantidad, precio_unitario) VALUES (?, ?, ?, ?)`,
+          args: [ventaId, item.producto_id, item.cantidad, item.precio_unitario]
+        });
+    }
 
     await tx.commit();
     res.json({ message: 'Venta registrada con éxito.' });
-  } catch (err) { res.status(500).json({ error: 'Error al procesar la venta.' }); }
+  } catch (err) { 
+    console.error('Error procesando venta:', err);
+    res.status(500).json({ error: 'Error al procesar la venta.' }); 
+  }
 });
 
 app.get('/api/ventas', async (req, res) => {
@@ -219,7 +239,6 @@ app.get('/api/ventas', async (req, res) => {
   } catch (err) { res.status(500).json({ error: 'Error al obtener historial.' }); }
 });
 
-// RESPALDO DE VENTAS REAL EN ARCHIVO JSON ANTES DE BORRAR
 app.delete('/api/ventas/reset', async (req, res) => {
   try {
     const ventas = await dbAll(`SELECT * FROM ventas`);

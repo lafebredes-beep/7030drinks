@@ -22,29 +22,53 @@
     <!-- PESTAÑA INVENTARIO -->
     <div id="seccionInventario" class="space-y-6">
       
-      <!-- Registrar Venta -->
+      <!-- Registrar Venta / Carrito -->
       <div class="p-4 md:p-5 bg-white border border-blue-200 rounded-lg shadow-sm">
-        <h2 class="text-lg font-bold mb-3 text-blue-900">Registrar Venta Rápida</h2>
-        <div class="grid grid-cols-1 md:grid-cols-4 gap-3">
-          <!-- Buscador Predictivo de Productos / Combos -->
-          <div class="md:col-span-2 relative">
-            <input id="inputBusquedaVenta" list="listaBebidasDatalist" placeholder="🔍 Escribe para buscar bebida, combo o código..." class="p-2.5 border rounded-lg w-full bg-gray-50 text-sm" onchange="sincronizarProductoSeleccionado()">
+        <h2 class="text-lg font-bold mb-3 text-blue-900">Registrar Venta (Carrito)</h2>
+        
+        <div class="grid grid-cols-1 md:grid-cols-5 gap-3">
+          <div class="md:col-span-3 relative">
+            <input id="inputBusquedaVenta" list="listaBebidasDatalist" placeholder="🔍 Buscar bebida, combo o código..." class="p-2.5 border rounded-lg w-full bg-gray-50 text-sm" onchange="sincronizarProductoSeleccionado()">
             <datalist id="listaBebidasDatalist"></datalist>
             <input type="hidden" id="selectProducto">
+            <input type="hidden" id="precioProductoTemp">
+            <input type="hidden" id="nombreProductoTemp">
           </div>
-          <input id="cantVenta" type="number" placeholder="Cantidad" value="1" min="1" class="p-2.5 border rounded-lg w-full">
-          <select id="metodoPago" class="p-2.5 border rounded-lg w-full bg-gray-50">
-            <option value="EFECTIVO">Efectivo</option>
-            <option value="MERCADO_PAGO">Mercado Pago</option>
-            <option value="TRANSFERENCIA">Transferencia</option>
-          </select>
+          <input id="cantVenta" type="number" placeholder="Cant." value="1" min="1" class="p-2.5 border rounded-lg w-full">
+          <button onclick="agregarAlCarrito()" class="bg-indigo-100 text-indigo-700 border border-indigo-300 font-bold px-4 py-2.5 rounded-lg hover:bg-indigo-200 transition-colors">➕ Agregar</button>
         </div>
-        <div class="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 mt-4">
-          <div class="flex items-center gap-2">
-            <label class="text-sm font-semibold text-gray-700 whitespace-nowrap">Vendedor / Turno:</label>
-            <input id="vendedor" type="text" placeholder="Ej. Turno Noche" class="p-2 border rounded-lg text-sm bg-gray-50 w-full md:w-52">
+
+        <div class="mt-4 border rounded-lg overflow-hidden hidden" id="contenedorCarrito">
+          <table class="w-full text-sm text-left">
+            <thead class="bg-gray-100 border-b">
+              <tr>
+                <th class="p-2">Producto</th>
+                <th class="p-2 text-center">Cant.</th>
+                <th class="p-2 text-center">Subtotal</th>
+                <th class="p-2 text-center"></th>
+              </tr>
+            </thead>
+            <tbody id="cuerpoCarrito" class="divide-y bg-white"></tbody>
+            <tfoot class="bg-gray-100 border-t">
+              <tr>
+                <td colspan="2" class="p-2 text-right font-bold text-gray-700">Total a Cobrar:</td>
+                <td class="p-2 text-center font-bold text-lg text-blue-700" id="totalCarrito">$0</td>
+                <td></td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+
+        <div class="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 mt-4 pt-4 border-t">
+          <div class="flex flex-wrap items-center gap-2">
+            <input id="vendedor" type="text" placeholder="Vendedor / Turno" class="p-2.5 border rounded-lg text-sm bg-gray-50 w-full md:w-32">
+            <select id="metodoPago" class="p-2.5 border rounded-lg bg-gray-50 text-sm">
+              <option value="EFECTIVO">Efectivo</option>
+              <option value="MERCADO_PAGO">Mercado Pago</option>
+              <option value="TRANSFERENCIA">Transferencia</option>
+            </select>
           </div>
-          <button id="btnConfirmarVenta" onclick="registrarVenta()" class="bg-blue-600 text-white font-semibold px-6 py-2.5 rounded-lg hover:bg-blue-700 transition-colors">Confirmar Venta</button>
+          <button id="btnConfirmarVenta" onclick="registrarVentaEnLote()" class="bg-blue-600 text-white font-bold px-6 py-2.5 rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed" disabled>Cobrar Venta</button>
         </div>
       </div>
 
@@ -173,8 +197,8 @@
   <script>
     let listaProductos = [];
     let editandoId = null;
+    let carritoVenta = [];
 
-    // Saneamiento contra ataques XSS
     function escapeHTML(str) {
       if (str === null || str === undefined) return '';
       return String(str)
@@ -212,7 +236,7 @@
         const combo2 = document.getElementById('comboIng2');
 
         datalist.innerHTML = '';
-        combo1.innerHTML = '<option value="">Seleccionar Botella/Bebida...</option>';
+        combo1.innerHTML = '<option value="">Seleccionar Botella...</option>';
         combo2.innerHTML = '<option value="">Ninguno</option>';
 
         listaProductos.forEach(p => {
@@ -220,29 +244,133 @@
           const tag = p.es_combo ? '[COMBO]' : `- Stock: ${p.stock}`;
           const cod = p.codigo_barras ? ` | Cód: ${p.codigo_barras}` : '';
           
-          // Llenar buscador predictivo
-          datalist.innerHTML += `<option value="${nombreEsc} ($${p.precio}) ${tag}${cod}" data-id="${p.id}"></option>`;
+          datalist.innerHTML += `<option value="${nombreEsc} ($${p.precio}) ${tag}${cod}" data-id="${p.id}" data-precio="${p.precio}" data-nombre="${nombreEsc}"></option>`;
 
           if (p.es_combo === 0) {
             combo1.innerHTML += `<option value="${p.id}">${nombreEsc} (Stock: ${p.stock})</option>`;
             combo2.innerHTML += `<option value="${p.id}">${nombreEsc} (Stock: ${p.stock})</option>`;
           }
         });
-
         renderizarTablaProductos(listaProductos);
-      } catch (err) {
-        console.error('Error al cargar productos:', err);
-      }
+      } catch (err) { console.error('Error al cargar:', err); }
     }
 
-    // Vincula el texto seleccionado en el buscador con el ID real
     function sincronizarProductoSeleccionado() {
       const val = document.getElementById('inputBusquedaVenta').value;
       const datalist = document.getElementById('listaBebidasDatalist');
-      const hiddenInput = document.getElementById('selectProducto');
       
       const option = Array.from(datalist.options).find(opt => opt.value === val);
-      hiddenInput.value = option ? option.getAttribute('data-id') : '';
+      if (option) {
+        document.getElementById('selectProducto').value = option.getAttribute('data-id');
+        document.getElementById('precioProductoTemp').value = option.getAttribute('data-precio');
+        document.getElementById('nombreProductoTemp').value = option.getAttribute('data-nombre');
+      } else {
+        document.getElementById('selectProducto').value = '';
+      }
+    }
+
+    function agregarAlCarrito() {
+      const id = document.getElementById('selectProducto').value;
+      const nombre = document.getElementById('nombreProductoTemp').value;
+      const precio = Number(document.getElementById('precioProductoTemp').value);
+      const cantidad = Number(document.getElementById('cantVenta').value);
+
+      if (!id || cantidad <= 0) return alert('Por favor, selecciona un producto válido.');
+
+      const index = carritoVenta.findIndex(item => item.producto_id === Number(id));
+      if (index !== -1) {
+        carritoVenta[index].cantidad += cantidad;
+        carritoVenta[index].subtotal = carritoVenta[index].cantidad * carritoVenta[index].precio;
+      } else {
+        carritoVenta.push({
+          producto_id: Number(id),
+          nombre: nombre,
+          precio: precio,
+          cantidad: cantidad,
+          subtotal: precio * cantidad
+        });
+      }
+
+      document.getElementById('inputBusquedaVenta').value = '';
+      document.getElementById('selectProducto').value = '';
+      document.getElementById('nombreProductoTemp').value = '';
+      document.getElementById('precioProductoTemp').value = '';
+      document.getElementById('cantVenta').value = 1;
+
+      renderizarCarrito();
+      document.getElementById('inputBusquedaVenta').focus();
+    }
+
+    function renderizarCarrito() {
+      const contenedor = document.getElementById('contenedorCarrito');
+      const tbody = document.getElementById('cuerpoCarrito');
+      const btn = document.getElementById('btnConfirmarVenta');
+      
+      tbody.innerHTML = '';
+      let total = 0;
+
+      if (carritoVenta.length === 0) {
+        contenedor.classList.add('hidden');
+        btn.disabled = true;
+        document.getElementById('totalCarrito').innerText = '$0';
+        return;
+      }
+
+      contenedor.classList.remove('hidden');
+      btn.disabled = false;
+
+      carritoVenta.forEach((item, index) => {
+        total += item.subtotal;
+        tbody.innerHTML += `
+          <tr>
+            <td class="p-2 font-medium text-gray-800">${item.nombre}</td>
+            <td class="p-2 text-center text-gray-700">${item.cantidad}</td>
+            <td class="p-2 text-center font-medium text-gray-800">$${item.subtotal}</td>
+            <td class="p-2 text-center">
+              <button onclick="eliminarDelCarrito(${index})" class="text-red-500 hover:text-red-700 bg-red-50 px-2 py-1 rounded" title="Quitar">✖</button>
+            </td>
+          </tr>
+        `;
+      });
+
+      document.getElementById('totalCarrito').innerText = `$${total}`;
+    }
+
+    function eliminarDelCarrito(index) {
+      carritoVenta.splice(index, 1);
+      renderizarCarrito();
+    }
+
+    async function registrarVentaEnLote() {
+      if (carritoVenta.length === 0) return;
+
+      const btn = document.getElementById('btnConfirmarVenta');
+      const metodo_pago = document.getElementById('metodoPago').value;
+      const vendedor = document.getElementById('vendedor').value;
+
+      btn.disabled = true;
+      btn.innerText = 'Procesando...';
+
+      try {
+        const res = await fetch('/api/ventas', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ carrito: carritoVenta, metodo_pago, vendedor })
+        });
+
+        if (res.ok) {
+          alert('¡Venta cobrada correctamente!');
+          carritoVenta = [];
+          renderizarCarrito();
+          await cargarProductos();
+        } else {
+          const err = await res.json();
+          alert('❌ Error: ' + (err.error || 'No se pudo completar la venta.'));
+        }
+      } finally {
+        btn.disabled = (carritoVenta.length === 0);
+        btn.innerText = 'Cobrar Venta';
+      }
     }
 
     function renderizarTablaProductos(productos) {
@@ -457,40 +585,6 @@
       };
 
       reader.readAsText(file);
-    }
-
-    async function registrarVenta() {
-      const btn = document.getElementById('btnConfirmarVenta');
-      const producto_id = Number(document.getElementById('selectProducto').value);
-      const cantidad = Number(document.getElementById('cantVenta').value);
-      const metodo_pago = document.getElementById('metodoPago').value;
-      const vendedor = document.getElementById('vendedor').value;
-
-      if (!producto_id) return alert('Por favor, selecciona o busca un producto válido de la lista.');
-
-      btn.disabled = true;
-      btn.innerText = 'Procesando...';
-
-      try {
-        const res = await fetch('/api/ventas', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ producto_id, cantidad, metodo_pago, vendedor })
-        });
-
-        if (res.ok) {
-          alert('¡Venta realizada!');
-          document.getElementById('inputBusquedaVenta').value = '';
-          document.getElementById('selectProducto').value = '';
-          await cargarProductos();
-        } else {
-          const err = await res.json();
-          alert('❌ Error: ' + (err.error || 'No se pudo completar la venta.'));
-        }
-      } finally {
-        btn.disabled = false;
-        btn.innerText = 'Confirmar Venta';
-      }
     }
 
     async function cargarHistorialVentas() {
