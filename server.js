@@ -108,11 +108,22 @@ app.put('/api/productos/:id', async (req, res) => {
   } catch (err) { res.status(500).json({ error: 'Error al actualizar producto.' }); }
 });
 
+// Eliminar / Desactivar producto individual
 app.delete('/api/productos/:id', async (req, res) => {
   try {
     await dbRun(`UPDATE productos SET activo = 0 WHERE id = ?`, [req.params.id]);
-    res.json({ message: 'Producto dado de baja.' });
+    res.json({ message: 'Producto eliminado correctamente.' });
   } catch (err) { res.status(500).json({ error: 'Error al eliminar producto.' }); }
+});
+
+// Borrar TODO el stock/inventario
+app.delete('/api/productos/reset-all', async (req, res) => {
+  try {
+    const tx = await db.transaction('write');
+    await tx.execute(`UPDATE productos SET activo = 0`);
+    await tx.commit();
+    res.json({ message: 'Todo el inventario ha sido vaciado con éxito.' });
+  } catch (err) { res.status(500).json({ error: 'Error al vaciar el inventario.' }); }
 });
 
 app.post('/api/productos/bulk', async (req, res) => {

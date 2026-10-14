@@ -142,6 +142,13 @@
             <tbody id="tablaProductos"></tbody>
           </table>
         </div>
+        
+        <!-- BOTÓN PARA BORRAR TODO EL INVENTARIO -->
+        <div class="flex justify-end pt-3 border-t">
+          <button onclick="vaciarInventarioCompleto()" class="bg-red-600 hover:bg-red-700 text-white font-bold text-sm px-4 py-2 rounded-lg transition-colors shadow-sm flex items-center gap-1.5">
+            🗑️ Vaciar Todo el Inventario
+          </button>
+        </div>
       </div>
     </div>
 
@@ -637,9 +644,24 @@
     }
 
     async function eliminarProducto(id) {
-      if (!confirm('¿Deseas dar de baja este producto? (Se ocultará pero no afectará a las ventas pasadas)')) return;
-      await fetch(`/api/productos/${id}`, { method: 'DELETE' });
-      cargarProductos();
+      if (!confirm('¿Deseas eliminar este producto del inventario?')) return;
+      const res = await fetch(`/api/productos/${id}`, { method: 'DELETE' });
+      if (res.ok) {
+        await cargarProductos();
+      } else {
+        alert('No se pudo eliminar el producto.');
+      }
+    }
+
+    async function vaciarInventarioCompleto() {
+      if (!confirm('⚠️ ¿ATENCIÓN: Estás seguro de que deseas eliminar TODO el inventario de productos?\nEsta acción ocultará todas las bebidas actuales.')) return;
+      const res = await fetch('/api/productos/reset-all', { method: 'DELETE' });
+      if (res.ok) {
+        alert('Inventario vaciado con éxito.');
+        await cargarProductos();
+      } else {
+        alert('Error al vaciar el inventario.');
+      }
     }
 
     cargarProductos();
