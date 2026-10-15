@@ -125,6 +125,7 @@ app.get('/api/productos', async (req, res) => {
 });
 
 // BUSQUEDA RÁPIDA PARA AUTOCOMPLETADO
+// Importante: debe ir ANTES que cualquier /api/productos/:id
 app.get('/api/productos/buscar', async (req, res) => {
   try {
     const q = (req.query.q || '').trim();
@@ -179,22 +180,27 @@ app.put('/api/productos/:id', async (req, res) => {
   } catch (err) { res.status(500).json({ error: 'Error al actualizar producto.' }); }
 });
 
-// ELIMINAR (soft)
-app.delete('/api/productos/:id', async (req, res) => {
-  try {
-    await dbRun(`UPDATE productos SET activo = 0 WHERE id = ?`, [req.params.id]);
-    res.json({ message: 'Producto eliminado correctamente.' });
-  } catch (err) { res.status(500).json({ error: 'Error al eliminar producto.' }); }
-});
-
 // VACIAR TODO EL INVENTARIO
+// MUY IMPORTANTE: esta ruta debe ir ANTES de /api/productos/:id
+// Si va después, Express la matchea como id="reset-all" y no hace nada.
 app.delete('/api/productos/reset-all', async (req, res) => {
   try {
     const tx = await db.transaction('write');
     await tx.execute(`UPDATE productos SET activo = 0`);
     await tx.commit();
     res.json({ message: 'Todo el inventario ha sido vaciado con éxito.' });
-  } catch (err) { res.status(500).json({ error: 'Error al vaciar el inventario.' }); }
+  } catch (err) {
+    console.error('Error en reset-all:', err);
+    res.status(500).json({ error: 'Error al vaciar el inventario.' });
+  }
+});
+
+// ELIMINAR (soft) — va DESPUÉS de reset-all
+app.delete('/api/productos/:id', async (req, res) => {
+  try {
+    await dbRun(`UPDATE productos SET activo = 0 WHERE id = ?`, [req.params.id]);
+    res.json({ message: 'Producto eliminado correctamente.' });
+  } catch (err) { res.status(500).json({ error: 'Error al eliminar producto.' }); }
 });
 
 // IMPORTAR CSV (bulk) — optimizado con db.batch
