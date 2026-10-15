@@ -7,7 +7,7 @@ const { createClient } = require('@libsql/client');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
 // Asegurar existencia del directorio de backups
@@ -97,7 +97,6 @@ app.get('/api/productos', async (req, res) => {
       countArgs.push(like, like);
     }
 
-    // Total
     const totalRow = await dbGet(
       `SELECT COUNT(*) as total FROM productos p WHERE ${where}`,
       countArgs
@@ -105,7 +104,6 @@ app.get('/api/productos', async (req, res) => {
     const total = Number(totalRow?.total || 0);
     const totalPages = Math.max(1, Math.ceil(total / limit));
 
-    // Página actual
     const items = await dbAll(
       `SELECT p.*, 
         CASE WHEN p.es_combo = 0 THEN (p.stock <= 5) ELSE 0 END as alerta_stock,
@@ -126,7 +124,7 @@ app.get('/api/productos', async (req, res) => {
   }
 });
 
-// BUSQUEDA RÁPIDA PARA AUTOCOMPLETADO (venta + combos)
+// BUSQUEDA RÁPIDA PARA AUTOCOMPLETADO
 app.get('/api/productos/buscar', async (req, res) => {
   try {
     const q = (req.query.q || '').trim();
@@ -199,25 +197,58 @@ app.delete('/api/productos/reset-all', async (req, res) => {
   } catch (err) { res.status(500).json({ error: 'Error al vaciar el inventario.' }); }
 });
 
-// IMPORTAR CSV (bulk)
+// IMPORTAR CSV (bulk) — optimizado con db.batch
 app.post('/api/productos/bulk', async (req, res) => {
   const { productos } = req.body;
   if (!Array.isArray(productos) || productos.length === 0) {
     return res.status(400).json({ error: 'No se enviaron datos válidos.' });
   }
+
+  // Normalizar y filtrar válidos
+  const validos = [];
+  for (const p of productos) {
+    const nombre = String(p?.nombre || '').trim();
+    const precio = Number(p?.precio);
+    if (!nombre || !Number.isFinite(precio) || precio <= 0) continue;
+    validos.push({
+      nombre,
+      costo: Number(p?.costo) || 0,
+      precio,
+      stock: Math.floor(Number(p?.stock)) || 0,
+      codigo_barras: String(p?.codigo_barras || '').trim()
+    });
+  }
+
+  if (validos.length === 0) {
+    return res.status(400).json({ error: 'Ninguno de los productos tiene nombre y precio válidos.' });
+  }
+
   try {
-    const tx = await db.transaction('write');
-    for (const p of productos) {
-      if (p.nombre && Number(p.precio) > 0) {
-        await tx.execute({
-          sql: `INSERT INTO productos (nombre, costo, precio, stock, codigo_barras, es_combo, activo) VALUES (?, ?, ?, ?, ?, 0, 1)`,
-          args: [p.nombre.trim(), Number(p.costo) || 0, Number(p.precio), Math.floor(Number(p.stock)) || 0, p.codigo_barras || '']
-        });
-      }
+    const CHUNK = 100;
+    let insertados = 0;
+
+    for (let i = 0; i < validos.length; i += CHUNK) {
+      const chunk = validos.slice(i, i + CHUNK);
+      const stmts = chunk.map(p => ({
+        sql: `INSERT INTO productos (nombre, costo, precio, stock, codigo_barras, es_combo, activo)
+              VALUES (?, ?, ?, ?, ?, 0, 1)`,
+        args: [p.nombre, p.costo, p.precio, p.stock, p.codigo_barras]
+      }));
+
+      // Un solo roundtrip por chunk (no uno por producto)
+      await db.batch(stmts, 'write');
+      insertados += chunk.length;
     }
-    await tx.commit();
-    res.json({ message: 'Productos importados con éxito.' });
-  } catch (err) { res.status(500).json({ error: 'Error durante la importación masiva.' }); }
+
+    res.json({
+      message: `Se importaron ${insertados} productos con éxito.`,
+      insertados,
+      omitidos: productos.length - insertados
+    });
+  } catch (err) {
+    console.error('Error en /api/productos/bulk:', err);
+    res.status(500).json({ error: 'Error durante la importación: ' + (err?.message || 'desconocido') });
+  }
 });
 
 // COMBOS
