@@ -27,9 +27,13 @@
         <h2 class="text-lg font-bold mb-3 text-blue-900">Registrar Venta (Carrito)</h2>
         
         <div class="grid grid-cols-1 md:grid-cols-5 gap-3">
+          <!-- Buscador Predictivo Optimizado en JS -->
           <div class="md:col-span-3 relative">
-            <input id="inputBusquedaVenta" list="listaBebidasDatalist" placeholder="🔍 Buscar bebida, combo o código..." class="p-2.5 border rounded-lg w-full bg-gray-50 text-sm" onchange="sincronizarProductoSeleccionado()">
-            <datalist id="listaBebidasDatalist"></datalist>
+            <input id="inputBusquedaVenta" type="text" autocomplete="off" placeholder="🔍 Buscar bebida, combo o código..." class="p-2.5 border rounded-lg w-full bg-gray-50 text-sm" oninput="buscarProductosVenta(this.value)">
+            
+            <!-- Lista desplegable rápida (máx 10 items) -->
+            <div id="desplegableResultados" class="absolute z-50 left-0 right-0 bg-white border rounded-lg shadow-lg mt-1 max-h-60 overflow-y-auto hidden"></div>
+
             <input type="hidden" id="selectProducto">
             <input type="hidden" id="precioProductoTemp">
             <input type="hidden" id="nombreProductoTemp">
@@ -72,7 +76,7 @@
         </div>
       </div>
 
-      <!-- Crear Combos Dinámicos -->
+      <!-- Armar Combos -->
       <div class="p-4 md:p-5 bg-amber-50 border border-amber-200 rounded-lg shadow-sm space-y-3">
         <h2 class="text-lg font-bold text-amber-900">🔥 Armar Nuevo Combo / Promoción</h2>
         <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -98,7 +102,7 @@
         </div>
       </div>
 
-      <!-- Cargar / Editar Productos Individuales -->
+      <!-- Cargar / Editar Productos -->
       <div class="p-4 md:p-5 bg-white rounded-lg border shadow-sm space-y-4">
         <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-2">
           <h2 id="tituloFormProducto" class="text-lg font-bold text-gray-800">Cargar / Importar Productos Sueltos</h2>
@@ -120,7 +124,7 @@
         </div>
       </div>
 
-      <!-- Tabla Inventario con Buscador -->
+      <!-- Tabla Inventario con Buscador y Paginación -->
       <div class="bg-white p-4 md:p-5 rounded-lg border shadow-sm space-y-3">
         <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
           <h2 class="text-lg font-bold text-gray-800">Inventario y Combos</h2>
@@ -143,9 +147,14 @@
           </table>
         </div>
         
-        <!-- BOTÓN PARA BORRAR TODO EL INVENTARIO -->
-        <div class="flex justify-end pt-3 border-t">
-          <button onclick="vaciarInventarioCompleto()" class="bg-red-600 hover:bg-red-700 text-white font-bold text-sm px-4 py-2 rounded-lg transition-colors shadow-sm flex items-center gap-1.5">
+        <!-- Paginación + Vaciar Inventario -->
+        <div class="flex flex-col sm:flex-row justify-between items-center gap-3 pt-3 border-t">
+          <div class="flex items-center gap-2">
+            <button onclick="cambiarPagina(-1)" class="px-3 py-1 bg-gray-200 hover:bg-gray-300 rounded text-xs font-bold">← Anterior</button>
+            <span id="infoPagina" class="text-xs font-semibold text-gray-600">Página 1</span>
+            <button onclick="cambiarPagina(1)" class="px-3 py-1 bg-gray-200 hover:bg-gray-300 rounded text-xs font-bold">Siguiente →</button>
+          </div>
+          <button onclick="vaciarInventarioCompleto()" class="bg-red-600 hover:bg-red-700 text-white font-bold text-xs px-3 py-2 rounded-lg transition-colors">
             🗑️ Vaciar Todo el Inventario
           </button>
         </div>
@@ -203,8 +212,11 @@
 
   <script>
     let listaProductos = [];
+    let productosFiltrados = [];
     let editandoId = null;
     let carritoVenta = [];
+    let paginaActual = 1;
+    const itemsPorPagina = 20;
 
     function escapeHTML(str) {
       if (str === null || str === undefined) return '';
@@ -237,442 +249,50 @@
       try {
         const res = await fetch('/api/productos');
         listaProductos = await res.json();
+        productosFiltrados = [...listaProductos];
 
-        let datalistHTML = '';
-        let combo1HTML = '<option value="">Seleccionar Botella...</option>';
-        let combo2HTML = '<option value="">Ninguno</option>';
-
-        listaProductos.forEach(p => {
-          const nombreEsc = escapeHTML(p.nombre);
-          const tag = p.es_combo ? '[COMBO]' : `- Stock: ${p.stock}`;
-          const cod = p.codigo_barras ? ` | Cód: ${p.codigo_barras}` : '';
-          
-          datalistHTML += `<option value="${nombreEsc} ($${p.precio}) ${tag}${cod}" data-id="${p.id}" data-precio="${p.precio}" data-nombre="${nombreEsc}"></option>`;
-
-          if (p.es_combo === 0) {
-            combo1HTML += `<option value="${p.id}">${nombreEsc} (Stock: ${p.stock})</option>`;
-            combo2HTML += `<option value="${p.id}">${nombreEsc} (Stock: ${p.stock})</option>`;
-          }
+        // Cargar los selects de combo con un conjunto inicial liviano
+        const combo1 = document.getElementById('comboIng1');
+        const combo2 = document.getElementById('comboIng2');
+        let comboHTML = '<option value="">Seleccionar Botella...</option>';
+        
+        listaProductos.filter(p => !p.es_combo).slice(0, 50).forEach(p => {
+          comboHTML += `<option value="${p.id}">${escapeHTML(p.nombre)} (Stock:${p.stock})</option>`;
         });
+        
+        combo1.innerHTML = comboHTML;
+        combo2.innerHTML = '<option value="">Ninguno</option>' + comboHTML;
 
-        // Única inserción limpia al DOM
-        document.getElementById('listaBebidasDatalist').innerHTML = datalistHTML;
-        document.getElementById('comboIng1').innerHTML = combo1HTML;
-        document.getElementById('comboIng2').innerHTML = combo2HTML;
-
-        renderizarTablaProductos(listaProductos);
+        paginaActual = 1;
+        renderizarTablaProductos();
       } catch (err) { console.error('Error al cargar:', err); }
     }
 
-    function sincronizarProductoSeleccionado() {
-      const val = document.getElementById('inputBusquedaVenta').value;
-      const datalist = document.getElementById('listaBebidasDatalist');
-      
-      const option = Array.from(datalist.options).find(opt => opt.value === val);
-      if (option) {
-        document.getElementById('selectProducto').value = option.getAttribute('data-id');
-        document.getElementById('precioProductoTemp').value = option.getAttribute('data-precio');
-        document.getElementById('nombreProductoTemp').value = option.getAttribute('data-nombre');
-      } else {
-        document.getElementById('selectProducto').value = '';
-      }
-    }
+    // Buscador interactivo ultrarrápido (Muestreo de 10 ítems max)
+    function buscarProductosVenta(query) {
+      const desplegable = document.getElementById('desplegableResultados');
+      const q = query.toLowerCase().trim();
 
-    function agregarAlCarrito() {
-      const id = document.getElementById('selectProducto').value;
-      const nombre = document.getElementById('nombreProductoTemp').value;
-      const precio = Number(document.getElementById('precioProductoTemp').value);
-      const cantidad = Number(document.getElementById('cantVenta').value);
-
-      if (!id || cantidad <= 0) return alert('Por favor, selecciona un producto válido.');
-
-      const index = carritoVenta.findIndex(item => item.producto_id === Number(id));
-      if (index !== -1) {
-        carritoVenta[index].cantidad += cantidad;
-        carritoVenta[index].subtotal = carritoVenta[index].cantidad * carritoVenta[index].precio;
-      } else {
-        carritoVenta.push({
-          producto_id: Number(id),
-          nombre: nombre,
-          precio: precio,
-          cantidad: cantidad,
-          subtotal: precio * cantidad
-        });
-      }
-
-      document.getElementById('inputBusquedaVenta').value = '';
-      document.getElementById('selectProducto').value = '';
-      document.getElementById('nombreProductoTemp').value = '';
-      document.getElementById('precioProductoTemp').value = '';
-      document.getElementById('cantVenta').value = 1;
-
-      renderizarCarrito();
-      document.getElementById('inputBusquedaVenta').focus();
-    }
-
-    function renderizarCarrito() {
-      const contenedor = document.getElementById('contenedorCarrito');
-      const tbody = document.getElementById('cuerpoCarrito');
-      const btn = document.getElementById('btnConfirmarVenta');
-      
-      let htmlRows = '';
-      let total = 0;
-
-      if (carritoVenta.length === 0) {
-        tbody.innerHTML = '';
-        contenedor.classList.add('hidden');
-        btn.disabled = true;
-        document.getElementById('totalCarrito').innerText = '$0';
+      if (!q) {
+        desplegable.classList.add('hidden');
         return;
       }
 
-      contenedor.classList.remove('hidden');
-      btn.disabled = false;
+      const resultados = listaProductos.filter(p => 
+        p.nombre.toLowerCase().includes(q) || 
+        (p.codigo_barras && p.codigo_barras.toLowerCase().includes(q))
+      ).slice(0, 10);
 
-      carritoVenta.forEach((item, index) => {
-        total += item.subtotal;
-        htmlRows += `
-          <tr>
-            <td class="p-2 font-medium text-gray-800">${item.nombre}</td>
-            <td class="p-2 text-center text-gray-700">${item.cantidad}</td>
-            <td class="p-2 text-center font-medium text-gray-800">$${item.subtotal}</td>
-            <td class="p-2 text-center">
-              <button onclick="eliminarDelCarrito(${index})" class="text-red-500 hover:text-red-700 bg-red-50 px-2 py-1 rounded" title="Quitar">✖</button>
-            </td>
-          </tr>
-        `;
-      });
-
-      tbody.innerHTML = htmlRows;
-      document.getElementById('totalCarrito').innerText = `$${total}`;
-    }
-
-    function eliminarDelCarrito(index) {
-      carritoVenta.splice(index, 1);
-      renderizarCarrito();
-    }
-
-    async function registrarVentaEnLote() {
-      if (carritoVenta.length === 0) return;
-
-      const btn = document.getElementById('btnConfirmarVenta');
-      const metodo_pago = document.getElementById('metodoPago').value;
-      const vendedor = document.getElementById('vendedor').value;
-
-      btn.disabled = true;
-      btn.innerText = 'Procesando...';
-
-      try {
-        const res = await fetch('/api/ventas', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ carrito: carritoVenta, metodo_pago, vendedor })
-        });
-
-        if (res.ok) {
-          alert('¡Venta cobrada correctamente!');
-          carritoVenta = [];
-          renderizarCarrito();
-          await cargarProductos();
-        } else {
-          const err = await res.json();
-          alert('❌ Error: ' + (err.error || 'No se pudo completar la venta.'));
-        }
-      } finally {
-        btn.disabled = (carritoVenta.length === 0);
-        btn.innerText = 'Cobrar Venta';
-      }
-    }
-
-    function renderizarTablaProductos(productos) {
-      const tbody = document.getElementById('tablaProductos');
-
-      if (productos.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="7" class="border p-4 text-center text-gray-500">No se encontraron productos registrados.</td></tr>';
-        return;
-      }
-
-      let htmlRows = '';
-      productos.forEach(p => {
-        const nombreEsc = escapeHTML(p.nombre);
-        const componentesEsc = escapeHTML(p.componentes_txt);
-
-        htmlRows += `
-          <tr class="hover:bg-gray-50">
-            <td class="border p-2 text-center font-bold">
-              ${p.es_combo ? '<span class="bg-amber-100 text-amber-800 text-xs px-2 py-1 rounded">COMBO</span>' : '<span class="bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded">SUELTO</span>'}
-            </td>
-            <td class="border p-2 font-medium">
-              ${nombreEsc}
-              ${componentesEsc ? `<br><span class="text-xs text-amber-700 font-normal">Incluye: ${componentesEsc}</span>` : ''}
-            </td>
-            <td class="border p-2 text-center text-gray-500">$${p.costo || 0}</td>
-            <td class="border p-2 text-center font-bold">$${p.precio}</td>
-            <td class="border p-2 text-center font-bold text-gray-700">${p.es_combo ? '-' : p.stock}</td>
-            <td class="border p-2 text-center font-bold ${p.alerta_stock ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}">
-              ${p.alerta_stock ? 'SIN STOCK / REPONER' : 'DISPONIBLE'}
-            </td>
-            <td class="border p-2 text-center space-x-1">
-              ${p.es_combo === 0 ? `<button onclick="prepararEdicion(${p.id})" class="p-1 bg-amber-100 text-amber-800 rounded hover:bg-amber-200" title="Editar">✏️</button>` : ''}
-              <button onclick="eliminarProducto(${p.id})" class="p-1 bg-red-100 text-red-800 rounded hover:bg-red-200" title="Eliminar">🗑️</button>
-            </td>
-          </tr>
-        `;
-      });
-
-      // Único renderizado a la tabla
-      tbody.innerHTML = htmlRows;
-    }
-
-    function filtrarProductos() {
-      const query = document.getElementById('buscadorInventario').value.toLowerCase().trim();
-      const filtrados = listaProductos.filter(p => 
-        p.nombre.toLowerCase().includes(query) || 
-        (p.codigo_barras && p.codigo_barras.toLowerCase().includes(query))
-      );
-      renderizarTablaProductos(filtrados);
-    }
-
-    function prepararEdicion(id) {
-      const prod = listaProductos.find(p => p.id === id);
-      if (!prod) return;
-
-      editandoId = id;
-      document.getElementById('nombre').value = prod.nombre;
-      document.getElementById('costo').value = prod.costo;
-      document.getElementById('precio').value = prod.precio;
-      document.getElementById('stock').value = prod.stock;
-      document.getElementById('codigo_barras').value = prod.codigo_barras || '';
-
-      document.getElementById('tituloFormProducto').innerText = '✏️ Editar Producto Suelto';
-      
-      const btnGuardar = document.getElementById('btnGuardarProd');
-      btnGuardar.innerText = 'Actualizar Producto';
-      btnGuardar.className = 'bg-amber-600 text-white font-medium px-4 py-2 rounded hover:bg-amber-700';
-      
-      document.getElementById('btnCancelarEdit').classList.remove('hidden');
-      window.scrollTo({ top: 300, behavior: 'smooth' });
-    }
-
-    function cancelarEdicion() {
-      editandoId = null;
-      document.getElementById('nombre').value = '';
-      document.getElementById('costo').value = '';
-      document.getElementById('precio').value = '';
-      document.getElementById('stock').value = '';
-      document.getElementById('codigo_barras').value = '';
-
-      document.getElementById('tituloFormProducto').innerText = 'Cargar / Importar Productos Sueltos';
-      
-      const btnGuardar = document.getElementById('btnGuardarProd');
-      btnGuardar.innerText = 'Guardar Producto';
-      btnGuardar.className = 'bg-green-600 text-white font-medium px-4 py-2 rounded hover:bg-green-700';
-
-      document.getElementById('btnCancelarEdit').classList.add('hidden');
-    }
-
-    async function guardarProducto() {
-      const btn = document.getElementById('btnGuardarProd');
-      const p = {
-        nombre: document.getElementById('nombre').value,
-        costo: Number(document.getElementById('costo').value),
-        precio: Number(document.getElementById('precio').value),
-        stock: Number(document.getElementById('stock').value),
-        codigo_barras: document.getElementById('codigo_barras').value
-      };
-
-      if (!p.nombre || isNaN(p.precio) || p.precio <= 0) return alert('Ingresa un nombre y un precio válidos.');
-
-      btn.disabled = true;
-      btn.innerText = 'Procesando...';
-
-      try {
-        const url = editandoId ? `/api/productos/${editandoId}` : '/api/productos';
-        const method = editandoId ? 'PUT' : 'POST';
-
-        const res = await fetch(url, {
-          method,
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(p)
-        });
-
-        if (res.ok) {
-          cancelarEdicion();
-          await cargarProductos();
-        } else {
-          const err = await res.json();
-          alert('Error: ' + (err.error || 'No se pudo guardar el producto.'));
-        }
-      } finally {
-        btn.disabled = false;
-        btn.innerText = editandoId ? 'Actualizar Producto' : 'Guardar Producto';
-      }
-    }
-
-    async function guardarCombo() {
-      const btn = document.getElementById('btnGuardarCombo');
-      const nombre = document.getElementById('comboNombre').value;
-      const precio = Number(document.getElementById('comboPrecio').value);
-      const ing1 = Number(document.getElementById('comboIng1').value);
-      const cant1 = Number(document.getElementById('comboCant1').value);
-      const ing2 = Number(document.getElementById('comboIng2').value);
-      const cant2 = Number(document.getElementById('comboCant2').value);
-
-      if (!nombre || !precio || !ing1) return alert('Ingresa el nombre, precio y al menos 1 producto componente.');
-
-      const items = [{ ingrediente_id: ing1, cantidad: cant1 }];
-      if (ing2) items.push({ ingrediente_id: ing2, cantidad: cant2 });
-
-      btn.disabled = true;
-      btn.innerText = 'Guardando...';
-
-      try {
-        const res = await fetch('/api/combos', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ nombre, precio, items })
-        });
-
-        if (res.ok) {
-          alert('¡Combo creado con éxito!');
-          document.getElementById('comboNombre').value = '';
-          document.getElementById('comboPrecio').value = '';
-          await cargarProductos();
-        } else {
-          const err = await res.json();
-          alert('Error: ' + (err.error || 'No se pudo guardar el combo.'));
-        }
-      } finally {
-        btn.disabled = false;
-        btn.innerText = 'Guardar Combo';
-      }
-    }
-
-    function importarCSV(event) {
-      const file = event.target.files[0];
-      if (!file) return;
-
-      const reader = new FileReader();
-      reader.onload = async function(e) {
-        const texto = e.target.result;
-        const lineas = texto.split('\n');
-        const productos = [];
-
-        for (let i = 0; i < lineas.length; i++) {
-          const linea = lineas[i].trim();
-          if (!linea) continue;
-
-          if (i === 0 && (linea.toLowerCase().includes('nombre') || linea.toLowerCase().includes('producto'))) {
-            continue;
-          }
-
-          const separador = linea.includes(';') ? ';' : ',';
-          const campos = linea.split(separador);
-
-          if (campos.length >= 2) {
-            productos.push({
-              nombre: campos[0]?.trim().replace(/^"|"$/g, ''),
-              costo: Number(campos[1]?.trim()) || 0,
-              precio: Number(campos[2]?.trim()) || 0,
-              stock: Number(campos[3]?.trim()) || 0,
-              codigo_barras: campos[4]?.trim().replace(/^"|"$/g, '') || ''
-            });
-          }
-        }
-
-        if (productos.length === 0) return alert('No se encontraron productos válidos en el archivo CSV.');
-
-        const res = await fetch('/api/productos/bulk', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ productos })
-        });
-
-        if (res.ok) {
-          alert(`¡Se importaron ${productos.length} productos con éxito!`);
-          cargarProductos();
-        } else {
-          alert('Error al importar productos.');
-        }
-
-        event.target.value = '';
-      };
-
-      reader.readAsText(file);
-    }
-
-    async function cargarHistorialVentas() {
-      try {
-        const res = await fetch('/api/ventas');
-        const ventas = await res.json();
-        const tbody = document.getElementById('tablaVentas');
-        
-        let htmlRows = '';
-        let totalGral = 0, ef = 0, mp = 0, tr = 0;
-
-        if (ventas.length === 0) {
-          tbody.innerHTML = '<tr><td colspan="6" class="border p-4 text-center text-gray-500">No hay ventas registradas.</td></tr>';
-        } else {
-          ventas.forEach(v => {
-            const monto = v.total || 0;
-            totalGral += monto;
-            if (v.metodo_pago === 'EFECTIVO') ef += monto;
-            if (v.metodo_pago === 'MERCADO_PAGO') mp += monto;
-            if (v.metodo_pago === 'TRANSFERENCIA') tr += monto;
-
-            htmlRows += `
-              <tr class="hover:bg-gray-50">
-                <td class="border p-2 text-center font-semibold">#${v.id}</td>
-                <td class="border p-2">${new Date(v.fecha).toLocaleString('es-AR')}</td>
-                <td class="border p-2 text-gray-700 font-medium">${escapeHTML(v.vendedor || 'General')}</td>
-                <td class="border p-2 font-medium">${escapeHTML(v.items_detalle || 'Detalle no disponible')}</td>
-                <td class="border p-2 text-center font-bold text-xs">${escapeHTML(v.metodo_pago)}</td>
-                <td class="border p-2 text-center font-bold">$${monto}</td>
-              </tr>
-            `;
-          });
-          tbody.innerHTML = htmlRows;
-        }
-
-        document.getElementById('totalRecaudado').innerText = `$${totalGral}`;
-        document.getElementById('totalEfectivo').innerText = `$${ef}`;
-        document.getElementById('totalMercadoPago').innerText = `$${mp}`;
-        document.getElementById('totalTransferencia').innerText = `$${tr}`;
-      } catch (err) {
-        console.error('Error al obtener ventas:', err);
-      }
-    }
-
-    async function vaciarVentas() {
-      if (!confirm('⚠️ ¿Seguro que deseas reiniciar las ventas?\nSe creará un respaldo en archivo JSON en el servidor antes de borrar.')) return;
-      const res = await fetch('/api/ventas/reset', { method: 'DELETE' });
-      const data = await res.json();
-      alert(data.message || 'Proceso completado.');
-      cargarHistorialVentas();
-    }
-
-    async function eliminarProducto(id) {
-      if (!confirm('¿Deseas eliminar este producto del inventario?')) return;
-      const res = await fetch(`/api/productos/${id}`, { method: 'DELETE' });
-      if (res.ok) {
-        await cargarProductos();
+      if (resultados.length === 0) {
+        desplegable.innerHTML = '<div class="p-3 text-xs text-gray-500">Sin coincidencias</div>';
       } else {
-        alert('No se pudo eliminar el producto.');
-      }
-    }
-
-    async function vaciarInventarioCompleto() {
-      if (!confirm('⚠️ ¿ATENCIÓN: Estás seguro de que deseas eliminar TODO el inventario de productos?\nEsta acción ocultará todas las bebidas actuales.')) return;
-      const res = await fetch('/api/productos/reset-all', { method: 'DELETE' });
-      if (res.ok) {
-        alert('Inventario vaciado con éxito.');
-        await cargarProductos();
-      } else {
-        alert('Error al vaciar el inventario.');
-      }
-    }
-
-    cargarProductos();
-  </script>
-</body>
-</html>
+        let html = '';
+        resultados.forEach(p => {
+          const tag = p.es_combo ? '[COMBO]' : `Stock: ${p.stock}`;
+          html += `
+            <div onclick="seleccionarProductoVenta(${p.id}, '${escapeHTML(p.nombre)}',${p.precio})" 
+                 class="p-2.5 hover:bg-blue-50 cursor-pointer border-b last:border-b-0 flex justify-between items-center text-sm">
+              <div>
+                <span class="font-semibold text-gray-800">${escapeHTML(p.nombre)}</span>
+                <span class="text-xs text-gray-400 block">${tag}</span>
+              </div>
