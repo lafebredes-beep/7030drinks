@@ -285,8 +285,8 @@
     // ============ INVENTARIO PAGINADO ============
     async function cargarProductos() {
       try {
-        const url = `/api/productos?page=${paginaActual}&limit=${POR_PAGINA}&q=${encodeURIComponent(queryInventario)}`;
-        const res = await fetch(url);
+        const url = `/api/productos?page=${paginaActual}&limit=${POR_PAGINA}&q=${encodeURIComponent(queryInventario)}&_=${Date.now()}`;
+        const res = await fetch(url, { cache: 'no-store' });
         const data = await res.json();
 
         listaProductos = Array.isArray(data.items) ? data.items : [];
@@ -703,7 +703,7 @@
       }
     }
 
-    // ============ IMPORTAR CSV (VERSIÓN ROBUSTA) ============
+    // ============ IMPORTAR CSV ============
     function importarCSV(event) {
       const file = event.target.files[0];
       if (!file) return;
@@ -720,9 +720,7 @@
 
       reader.onload = async function (e) {
         try {
-          // Sacar BOM si está presente (Excel suele agregarlo)
           let texto = String(e.target.result || '').replace(/^\uFEFF/, '');
-          // Normalizar saltos de línea Windows/Mac
           texto = texto.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
 
           const lineas = texto.split('\n');
@@ -733,7 +731,6 @@
             const linea = lineas[i].trim();
             if (!linea) continue;
 
-            // Saltear encabezado en las primeras filas
             if (productos.length === 0 && i < 2) {
               const low = linea.toLowerCase();
               if (low.includes('nombre') || low.includes('producto')) continue;
@@ -818,7 +815,7 @@
     // ============ HISTORIAL DE VENTAS ============
     async function cargarHistorialVentas() {
       try {
-        const res = await fetch('/api/ventas');
+        const res = await fetch('/api/ventas', { cache: 'no-store' });
         const ventas = await res.json();
         const tbody = document.getElementById('tablaVentas');
 
@@ -879,15 +876,27 @@
 
     async function vaciarInventarioCompleto() {
       if (!confirm('⚠️ ¿ATENCIÓN: Estás seguro de que deseas eliminar TODO el inventario de productos?\nEsta acción ocultará todas las bebidas actuales.')) return;
-      const res = await fetch('/api/productos/reset-all', { method: 'DELETE' });
-      if (res.ok) {
-        alert('Inventario vaciado con éxito.');
+
+      try {
+        const res = await fetch('/api/productos/reset-all', { method: 'DELETE', cache: 'no-store' });
+        let data = {};
+        try { data = await res.json(); } catch (_) {}
+
+        if (!res.ok) {
+          alert('❌ Error al vaciar el inventario: ' + (data.error || ('HTTP ' + res.status)));
+          return;
+        }
+
+        alert('✅ ' + (data.message || 'Inventario vaciado con éxito.'));
+
+        // Refrescar tabla y volver a página 1
         paginaActual = 1;
         queryInventario = '';
         document.getElementById('buscadorInventario').value = '';
         await cargarProductos();
-      } else {
-        alert('Error al vaciar el inventario.');
+      } catch (err) {
+        console.error('Error vaciando inventario:', err);
+        alert('❌ Error de conexión: ' + err.message);
       }
     }
 

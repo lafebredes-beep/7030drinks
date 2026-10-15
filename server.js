@@ -65,7 +65,6 @@ const dbAll = async (sql, params = []) => {
       FOREIGN KEY(venta_id) REFERENCES ventas(id)
     )`);
 
-    // Índices para acelerar búsquedas y paginación
     try { await dbRun("CREATE INDEX IF NOT EXISTS idx_productos_nombre ON productos(nombre)"); } catch (e) {}
     try { await dbRun("CREATE INDEX IF NOT EXISTS idx_productos_codigo ON productos(codigo_barras)"); } catch (e) {}
     try { await dbRun("CREATE INDEX IF NOT EXISTS idx_productos_activo ON productos(activo)"); } catch (e) {}
@@ -124,8 +123,7 @@ app.get('/api/productos', async (req, res) => {
   }
 });
 
-// BUSQUEDA RÁPIDA PARA AUTOCOMPLETADO
-// Importante: debe ir ANTES que cualquier /api/productos/:id
+// BUSQUEDA RÁPIDA PARA AUTOCOMPLETADO (antes de cualquier /:id)
 app.get('/api/productos/buscar', async (req, res) => {
   try {
     const q = (req.query.q || '').trim();
@@ -181,17 +179,26 @@ app.put('/api/productos/:id', async (req, res) => {
 });
 
 // VACIAR TODO EL INVENTARIO
-// MUY IMPORTANTE: esta ruta debe ir ANTES de /api/productos/:id
-// Si va después, Express la matchea como id="reset-all" y no hace nada.
+// Debe ir ANTES de /api/productos/:id.
+// Sin transacción: un solo UPDATE directo es más confiable contra Turso remoto.
 app.delete('/api/productos/reset-all', async (req, res) => {
   try {
-    const tx = await db.transaction('write');
-    await tx.execute(`UPDATE productos SET activo = 0`);
-    await tx.commit();
-    res.json({ message: 'Todo el inventario ha sido vaciado con éxito.' });
+    const upd = await db.execute('UPDATE productos SET activo = 0');
+    const check = await dbGet('SELECT COUNT(*) as c FROM productos WHERE activo = 1');
+    const quedanActivos = Number(check?.c || 0);
+
+    console.log('reset-all → filas afectadas:', upd.rowsAffected, '| activos restantes:', quedanActivos);
+
+    res.json({
+      message: quedanActivos === 0
+        ? 'Todo el inventario ha sido vaciado con éxito.'
+        : `Se desactivaron ${upd.rowsAffected} productos. Quedan ${quedanActivos} activos (revisar).`,
+      filasAfectadas: Number(upd.rowsAffected || 0),
+      quedanActivos
+    });
   } catch (err) {
     console.error('Error en reset-all:', err);
-    res.status(500).json({ error: 'Error al vaciar el inventario.' });
+    res.status(500).json({ error: 'Error al vaciar el inventario: ' + (err?.message || 'desconocido') });
   }
 });
 
@@ -210,7 +217,6 @@ app.post('/api/productos/bulk', async (req, res) => {
     return res.status(400).json({ error: 'No se enviaron datos válidos.' });
   }
 
-  // Normalizar y filtrar válidos
   const validos = [];
   for (const p of productos) {
     const nombre = String(p?.nombre || '').trim();
@@ -241,7 +247,6 @@ app.post('/api/productos/bulk', async (req, res) => {
         args: [p.nombre, p.costo, p.precio, p.stock, p.codigo_barras]
       }));
 
-      // Un solo roundtrip por chunk (no uno por producto)
       await db.batch(stmts, 'write');
       insertados += chunk.length;
     }
