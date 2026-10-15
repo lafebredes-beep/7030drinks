@@ -22,7 +22,7 @@ const db = createClient({
   authToken: process.env.TURSO_AUTH_TOKEN
 });
 
-// Funciones auxiliares para queries
+// Funciones auxiliares
 const dbRun = async (sql, params = []) => {
   const res = await db.execute({ sql, args: params });
   return { lastID: Number(res.lastInsertRowid) };
@@ -36,7 +36,7 @@ const dbAll = async (sql, params = []) => {
   return res.rows;
 };
 
-// Inicialización de la Base de Datos
+// Inicialización
 (async () => {
   try {
     await dbRun(`CREATE TABLE IF NOT EXISTS productos (
@@ -64,25 +64,97 @@ const dbAll = async (sql, params = []) => {
       producto_id INTEGER NOT NULL, cantidad INTEGER NOT NULL, precio_unitario REAL NOT NULL,
       FOREIGN KEY(venta_id) REFERENCES ventas(id)
     )`);
+
+    // Índices para acelerar búsquedas y paginación
+    try { await dbRun("CREATE INDEX IF NOT EXISTS idx_productos_nombre ON productos(nombre)"); } catch (e) {}
+    try { await dbRun("CREATE INDEX IF NOT EXISTS idx_productos_codigo ON productos(codigo_barras)"); } catch (e) {}
+    try { await dbRun("CREATE INDEX IF NOT EXISTS idx_productos_activo ON productos(activo)"); } catch (e) {}
+
     console.log("Conectado a la Base de Datos exitosamente.");
   } catch (err) {
     console.error("Error inicializando tablas:", err);
   }
 })();
 
-// ================= RUTAS DE PRODUCTOS =================
+// ================= PRODUCTOS =================
+
+// LISTADO PAGINADO + BUSQUEDA
 app.get('/api/productos', async (req, res) => {
   try {
-    const productos = await dbAll(`
-      SELECT p.*, 
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.min(200, Math.max(1, parseInt(req.query.limit) || 20));
+    const q = (req.query.q || '').trim();
+    const offset = (page - 1) * limit;
+
+    let where = 'p.activo = 1';
+    const args = [];
+    const countArgs = [];
+
+    if (q) {
+      where += ' AND (p.nombre LIKE ? OR p.codigo_barras LIKE ?)';
+      const like = `%${q}%`;
+      args.push(like, like);
+      countArgs.push(like, like);
+    }
+
+    // Total
+    const totalRow = await dbGet(
+      `SELECT COUNT(*) as total FROM productos p WHERE ${where}`,
+      countArgs
+    );
+    const total = Number(totalRow?.total || 0);
+    const totalPages = Math.max(1, Math.ceil(total / limit));
+
+    // Página actual
+    const items = await dbAll(
+      `SELECT p.*, 
         CASE WHEN p.es_combo = 0 THEN (p.stock <= 5) ELSE 0 END as alerta_stock,
-        (SELECT GROUP_CONCAT(i.nombre || ' x' || ci.cantidad, ', ') FROM combo_items ci JOIN productos i ON ci.ingrediente_id = i.id WHERE ci.combo_id = p.id) as componentes_txt
-      FROM productos p WHERE p.activo = 1 ORDER BY p.nombre ASC
-    `);
-    res.json(productos);
-  } catch (err) { res.status(500).json({ error: 'Error al obtener productos.' }); }
+        (SELECT GROUP_CONCAT(i.nombre || ' x' || ci.cantidad, ', ') 
+         FROM combo_items ci JOIN productos i ON ci.ingrediente_id = i.id 
+         WHERE ci.combo_id = p.id) as componentes_txt
+       FROM productos p
+       WHERE ${where}
+       ORDER BY p.nombre ASC
+       LIMIT ? OFFSET ?`,
+      [...args, limit, offset]
+    );
+
+    res.json({ items, total, page, limit, totalPages });
+  } catch (err) {
+    console.error('Error en /api/productos:', err);
+    res.status(500).json({ error: 'Error al obtener productos.' });
+  }
 });
 
+// BUSQUEDA RÁPIDA PARA AUTOCOMPLETADO (venta + combos)
+app.get('/api/productos/buscar', async (req, res) => {
+  try {
+    const q = (req.query.q || '').trim();
+    const limit = Math.min(20, Math.max(1, parseInt(req.query.limit) || 10));
+    const soloSueltos = req.query.soloSueltos === '1';
+
+    if (!q) return res.json([]);
+
+    const like = `%${q}%`;
+    let sql = `SELECT id, nombre, precio, stock, es_combo, codigo_barras
+               FROM productos
+               WHERE activo = 1 AND (nombre LIKE ? OR codigo_barras LIKE ?)`;
+    const args = [like, like];
+
+    if (soloSueltos) sql += ` AND es_combo = 0`;
+
+    sql += ` ORDER BY nombre ASC LIMIT ?`;
+    args.push(limit);
+
+    const rows = await dbAll(sql, args);
+    res.json(rows);
+  } catch (err) {
+    console.error('Error en /api/productos/buscar:', err);
+    res.status(500).json({ error: 'Error al buscar productos.' });
+  }
+});
+
+// CREAR
 app.post('/api/productos', async (req, res) => {
   const { nombre, costo, precio, stock, codigo_barras } = req.body;
   if (!nombre || !nombre.trim()) return res.status(400).json({ error: 'El nombre es obligatorio.' });
@@ -97,6 +169,7 @@ app.post('/api/productos', async (req, res) => {
   } catch (err) { res.status(500).json({ error: 'Error al crear producto.' }); }
 });
 
+// ACTUALIZAR
 app.put('/api/productos/:id', async (req, res) => {
   const { nombre, costo, precio, stock, codigo_barras } = req.body;
   try {
@@ -108,7 +181,7 @@ app.put('/api/productos/:id', async (req, res) => {
   } catch (err) { res.status(500).json({ error: 'Error al actualizar producto.' }); }
 });
 
-// Eliminar / Desactivar producto individual
+// ELIMINAR (soft)
 app.delete('/api/productos/:id', async (req, res) => {
   try {
     await dbRun(`UPDATE productos SET activo = 0 WHERE id = ?`, [req.params.id]);
@@ -116,7 +189,7 @@ app.delete('/api/productos/:id', async (req, res) => {
   } catch (err) { res.status(500).json({ error: 'Error al eliminar producto.' }); }
 });
 
-// Borrar TODO el stock/inventario
+// VACIAR TODO EL INVENTARIO
 app.delete('/api/productos/reset-all', async (req, res) => {
   try {
     const tx = await db.transaction('write');
@@ -126,6 +199,7 @@ app.delete('/api/productos/reset-all', async (req, res) => {
   } catch (err) { res.status(500).json({ error: 'Error al vaciar el inventario.' }); }
 });
 
+// IMPORTAR CSV (bulk)
 app.post('/api/productos/bulk', async (req, res) => {
   const { productos } = req.body;
   if (!Array.isArray(productos) || productos.length === 0) {
@@ -146,6 +220,7 @@ app.post('/api/productos/bulk', async (req, res) => {
   } catch (err) { res.status(500).json({ error: 'Error durante la importación masiva.' }); }
 });
 
+// COMBOS
 app.post('/api/combos', async (req, res) => {
   const { nombre, precio, items } = req.body;
   if (!nombre || !precio || !Array.isArray(items) || items.length === 0) {
@@ -174,10 +249,10 @@ app.post('/api/combos', async (req, res) => {
   } catch (err) { res.status(500).json({ error: 'Error al registrar el combo.' }); }
 });
 
-// ================= RUTAS DE VENTAS =================
+// ================= VENTAS =================
 app.post('/api/ventas', async (req, res) => {
   const { carrito, metodo_pago, vendedor } = req.body;
-  
+
   if (!Array.isArray(carrito) || carrito.length === 0) {
     return res.status(400).json({ error: 'El carrito de ventas está vacío.' });
   }
@@ -192,7 +267,7 @@ app.post('/api/ventas', async (req, res) => {
 
       const prodRes = await tx.execute({ sql: `SELECT * FROM productos WHERE id = ? AND activo = 1`, args: [item.producto_id] });
       if (prodRes.rows.length === 0) { await tx.rollback(); return res.status(404).json({ error: `Producto no encontrado.` }); }
-      
+
       const prod = prodRes.rows[0];
       totalVenta += prod.precio * cant;
 
@@ -205,16 +280,16 @@ app.post('/api/ventas', async (req, res) => {
           args: [prod.id]
         });
         for (const comp of compRes.rows) {
-          if (comp.stock < (comp.cant_combo * cant)) { 
-            await tx.rollback(); 
-            return res.status(400).json({ error: `Falta stock de ${comp.nombre} para armar el combo ${prod.nombre}.` }); 
+          if (comp.stock < (comp.cant_combo * cant)) {
+            await tx.rollback();
+            return res.status(400).json({ error: `Falta stock de ${comp.nombre} para armar el combo ${prod.nombre}.` });
           }
         }
         for (const comp of compRes.rows) {
           await tx.execute({ sql: `UPDATE productos SET stock = stock - ? WHERE id = ?`, args: [comp.cant_combo * cant, comp.id] });
         }
       }
-      item.precio_unitario = prod.precio; 
+      item.precio_unitario = prod.precio;
     }
 
     const ventaRes = await tx.execute({
@@ -222,19 +297,19 @@ app.post('/api/ventas', async (req, res) => {
       args: [metodo_pago || 'EFECTIVO', (vendedor && vendedor.trim()) ? vendedor.trim() : 'General', totalVenta]
     });
     const ventaId = Number(ventaRes.lastInsertRowid);
-    
+
     for (const item of carrito) {
-       await tx.execute({
-          sql: `INSERT INTO ventas_detalle (venta_id, producto_id, cantidad, precio_unitario) VALUES (?, ?, ?, ?)`,
-          args: [ventaId, item.producto_id, item.cantidad, item.precio_unitario]
-        });
+      await tx.execute({
+        sql: `INSERT INTO ventas_detalle (venta_id, producto_id, cantidad, precio_unitario) VALUES (?, ?, ?, ?)`,
+        args: [ventaId, item.producto_id, item.cantidad, item.precio_unitario]
+      });
     }
 
     await tx.commit();
     res.json({ message: 'Venta registrada con éxito.' });
-  } catch (err) { 
+  } catch (err) {
     console.error('Error procesando venta:', err);
-    res.status(500).json({ error: 'Error al procesar la venta.' }); 
+    res.status(500).json({ error: 'Error al procesar la venta.' });
   }
 });
 
@@ -254,11 +329,11 @@ app.delete('/api/ventas/reset', async (req, res) => {
   try {
     const ventas = await dbAll(`SELECT * FROM ventas`);
     const detalles = await dbAll(`SELECT * FROM ventas_detalle`);
-    
+
     const fechaStr = new Date().toISOString().replace(/[:.]/g, '-');
     const backupFilename = `backup_ventas_${fechaStr}.json`;
     const backupPath = path.join(backupsDir, backupFilename);
-    
+
     fs.writeFileSync(backupPath, JSON.stringify({ fecha: new Date(), ventas, detalles }, null, 2));
 
     const tx = await db.transaction('write');
