@@ -238,26 +238,28 @@
         const res = await fetch('/api/productos');
         listaProductos = await res.json();
 
-        const datalist = document.getElementById('listaBebidasDatalist');
-        const combo1 = document.getElementById('comboIng1');
-        const combo2 = document.getElementById('comboIng2');
-
-        datalist.innerHTML = '';
-        combo1.innerHTML = '<option value="">Seleccionar Botella...</option>';
-        combo2.innerHTML = '<option value="">Ninguno</option>';
+        let datalistHTML = '';
+        let combo1HTML = '<option value="">Seleccionar Botella...</option>';
+        let combo2HTML = '<option value="">Ninguno</option>';
 
         listaProductos.forEach(p => {
           const nombreEsc = escapeHTML(p.nombre);
           const tag = p.es_combo ? '[COMBO]' : `- Stock: ${p.stock}`;
           const cod = p.codigo_barras ? ` | Cód: ${p.codigo_barras}` : '';
           
-          datalist.innerHTML += `<option value="${nombreEsc} ($${p.precio}) ${tag}${cod}" data-id="${p.id}" data-precio="${p.precio}" data-nombre="${nombreEsc}"></option>`;
+          datalistHTML += `<option value="${nombreEsc} ($${p.precio}) ${tag}${cod}" data-id="${p.id}" data-precio="${p.precio}" data-nombre="${nombreEsc}"></option>`;
 
           if (p.es_combo === 0) {
-            combo1.innerHTML += `<option value="${p.id}">${nombreEsc} (Stock: ${p.stock})</option>`;
-            combo2.innerHTML += `<option value="${p.id}">${nombreEsc} (Stock: ${p.stock})</option>`;
+            combo1HTML += `<option value="${p.id}">${nombreEsc} (Stock: ${p.stock})</option>`;
+            combo2HTML += `<option value="${p.id}">${nombreEsc} (Stock: ${p.stock})</option>`;
           }
         });
+
+        // Única inserción limpia al DOM
+        document.getElementById('listaBebidasDatalist').innerHTML = datalistHTML;
+        document.getElementById('comboIng1').innerHTML = combo1HTML;
+        document.getElementById('comboIng2').innerHTML = combo2HTML;
+
         renderizarTablaProductos(listaProductos);
       } catch (err) { console.error('Error al cargar:', err); }
     }
@@ -313,10 +315,11 @@
       const tbody = document.getElementById('cuerpoCarrito');
       const btn = document.getElementById('btnConfirmarVenta');
       
-      tbody.innerHTML = '';
+      let htmlRows = '';
       let total = 0;
 
       if (carritoVenta.length === 0) {
+        tbody.innerHTML = '';
         contenedor.classList.add('hidden');
         btn.disabled = true;
         document.getElementById('totalCarrito').innerText = '$0';
@@ -328,7 +331,7 @@
 
       carritoVenta.forEach((item, index) => {
         total += item.subtotal;
-        tbody.innerHTML += `
+        htmlRows += `
           <tr>
             <td class="p-2 font-medium text-gray-800">${item.nombre}</td>
             <td class="p-2 text-center text-gray-700">${item.cantidad}</td>
@@ -340,6 +343,7 @@
         `;
       });
 
+      tbody.innerHTML = htmlRows;
       document.getElementById('totalCarrito').innerText = `$${total}`;
     }
 
@@ -382,18 +386,18 @@
 
     function renderizarTablaProductos(productos) {
       const tbody = document.getElementById('tablaProductos');
-      tbody.innerHTML = '';
 
       if (productos.length === 0) {
         tbody.innerHTML = '<tr><td colspan="7" class="border p-4 text-center text-gray-500">No se encontraron productos registrados.</td></tr>';
         return;
       }
 
+      let htmlRows = '';
       productos.forEach(p => {
         const nombreEsc = escapeHTML(p.nombre);
         const componentesEsc = escapeHTML(p.componentes_txt);
 
-        tbody.innerHTML += `
+        htmlRows += `
           <tr class="hover:bg-gray-50">
             <td class="border p-2 text-center font-bold">
               ${p.es_combo ? '<span class="bg-amber-100 text-amber-800 text-xs px-2 py-1 rounded">COMBO</span>' : '<span class="bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded">SUELTO</span>'}
@@ -415,6 +419,9 @@
           </tr>
         `;
       });
+
+      // Único renderizado a la tabla
+      tbody.innerHTML = htmlRows;
     }
 
     function filtrarProductos() {
@@ -599,8 +606,8 @@
         const res = await fetch('/api/ventas');
         const ventas = await res.json();
         const tbody = document.getElementById('tablaVentas');
-        tbody.innerHTML = '';
-
+        
+        let htmlRows = '';
         let totalGral = 0, ef = 0, mp = 0, tr = 0;
 
         if (ventas.length === 0) {
@@ -613,7 +620,7 @@
             if (v.metodo_pago === 'MERCADO_PAGO') mp += monto;
             if (v.metodo_pago === 'TRANSFERENCIA') tr += monto;
 
-            tbody.innerHTML += `
+            htmlRows += `
               <tr class="hover:bg-gray-50">
                 <td class="border p-2 text-center font-semibold">#${v.id}</td>
                 <td class="border p-2">${new Date(v.fecha).toLocaleString('es-AR')}</td>
@@ -624,6 +631,7 @@
               </tr>
             `;
           });
+          tbody.innerHTML = htmlRows;
         }
 
         document.getElementById('totalRecaudado').innerText = `$${totalGral}`;
