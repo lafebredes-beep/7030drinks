@@ -13,6 +13,14 @@
     <!-- Encabezado / Tabs -->
     <div class="bg-white p-4 md:p-6 rounded-lg shadow">
       <h1 class="text-2xl md:text-3xl font-bold text-center text-gray-800 mb-4">70/30 Drinks - Sistema de Control</h1>
+
+      <!-- Barra de respaldos -->
+      <div class="flex justify-center mb-4">
+        <button onclick="descargarRespaldoDiario()" class="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm px-4 py-2 rounded-lg shadow-sm transition-colors">
+          📥 Respaldo diario (Inventario + Ventas)
+        </button>
+      </div>
+
       <div class="flex justify-center border-b border-gray-200 space-x-2 md:space-x-4">
         <button id="btnTabInventario" onclick="cambiarTab('inventario')" class="pb-2 md:pb-3 px-4 md:px-6 font-bold border-b-4 border-blue-600 text-blue-600 text-sm md:text-base">📦 Inventario y Ventas</button>
         <button id="btnTabVentas" onclick="cambiarTab('ventas')" class="pb-2 md:pb-3 px-4 md:px-6 font-bold border-b-4 border-transparent text-gray-500 hover:text-blue-600 text-sm md:text-base">📊 Historial de Ventas</button>
@@ -157,9 +165,14 @@
             <span id="infoPagina" class="text-xs font-semibold text-gray-600">Página 1 / 1</span>
             <button onclick="cambiarPagina(1)" class="px-3 py-1 bg-gray-200 hover:bg-gray-300 rounded text-xs font-bold">Siguiente →</button>
           </div>
-          <button onclick="vaciarInventarioCompleto()" class="bg-red-600 hover:bg-red-700 text-white font-bold text-xs px-3 py-2 rounded-lg transition-colors">
-            🗑️ Vaciar Todo el Inventario
-          </button>
+          <div class="flex flex-wrap items-center gap-2">
+            <button onclick="descargarBackup('inventario')" class="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-3 py-2 rounded-lg transition-colors">
+              💾 Respaldar Inventario
+            </button>
+            <button onclick="vaciarInventarioCompleto()" class="bg-red-600 hover:bg-red-700 text-white font-bold text-xs px-3 py-2 rounded-lg transition-colors">
+              🗑️ Vaciar Todo el Inventario
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -186,10 +199,11 @@
       </div>
 
       <div class="bg-white p-4 md:p-5 rounded-lg border shadow-sm">
-        <div class="flex justify-between items-center mb-4">
+        <div class="flex flex-wrap justify-between items-center gap-2 mb-4">
           <h2 class="text-lg font-bold text-gray-800">Historial de Ventas</h2>
-          <div class="flex gap-2">
+          <div class="flex flex-wrap gap-2">
             <button onclick="cargarHistorialVentas()" class="text-sm bg-gray-100 hover:bg-gray-200 px-3 py-1.5 rounded border">🔄 Actualizar</button>
+            <button onclick="descargarBackup('ventas')" class="text-sm bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded font-semibold">💾 Respaldar Ventas</button>
             <button onclick="vaciarVentas()" class="text-sm bg-red-100 hover:bg-red-200 text-red-700 px-3 py-1.5 rounded border border-red-300 font-semibold">🗑️ Vaciar Historial</button>
           </div>
         </div>
@@ -246,6 +260,23 @@
     function formatearPrecio(n) {
       const num = Number(n) || 0;
       return '$' + num.toLocaleString('es-AR');
+    }
+
+    // ============ DESCARGAS DE RESPALDO ============
+    function descargarBackup(tipo) {
+      const url = tipo === 'inventario' ? '/api/backup/inventario' : '/api/backup/ventas';
+      const a = document.createElement('a');
+      a.href = url;
+      a.style.display = 'none';
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => { try { document.body.removeChild(a); } catch (e) {} }, 1000);
+    }
+
+    function descargarRespaldoDiario() {
+      // Descarga ambos, con un pequeño delay para que el navegador no bloquee
+      descargarBackup('inventario');
+      setTimeout(() => descargarBackup('ventas'), 900);
     }
 
     // Cerrar dropdowns al clickear fuera
@@ -856,7 +887,7 @@
     }
 
     async function vaciarVentas() {
-      if (!confirm('⚠️ ¿Seguro que deseas reiniciar las ventas?\nSe creará un respaldo en archivo JSON en el servidor antes de borrar.')) return;
+      if (!confirm('⚠️ ¿Seguro que deseas reiniciar las ventas?\nSe creará un respaldo en archivo JSON en el servidor antes de borrar.\n\nSugerencia: usá primero "💾 Respaldar Ventas" para bajar una copia a tu PC.')) return;
       const res = await fetch('/api/ventas/reset', { method: 'DELETE' });
       const data = await res.json();
       alert(data.message || 'Proceso completado.');
@@ -875,7 +906,7 @@
     }
 
     async function vaciarInventarioCompleto() {
-      if (!confirm('⚠️ ¿ATENCIÓN: Estás seguro de que deseas eliminar TODO el inventario de productos?\nEsta acción ocultará todas las bebidas actuales.')) return;
+      if (!confirm('⚠️ ¿ATENCIÓN: Estás seguro de que deseas eliminar TODO el inventario de productos?\nEsta acción ocultará todas las bebidas actuales.\n\nSugerencia: usá primero "💾 Respaldar Inventario" para bajar una copia a tu PC.')) return;
 
       try {
         const res = await fetch('/api/productos/reset-all', { method: 'DELETE', cache: 'no-store' });
@@ -889,7 +920,6 @@
 
         alert('✅ ' + (data.message || 'Inventario vaciado con éxito.'));
 
-        // Refrescar tabla y volver a página 1
         paginaActual = 1;
         queryInventario = '';
         document.getElementById('buscadorInventario').value = '';

@@ -75,6 +75,30 @@ const dbAll = async (sql, params = []) => {
   }
 })();
 
+// ================= HELPERS DE CSV =================
+function csvEscape(val) {
+  if (val === null || val === undefined) return '';
+  const s = String(val);
+  if (s.includes(';') || s.includes('"') || s.includes('\n') || s.includes('\r')) {
+    return '"' + s.replace(/"/g, '""') + '"';
+  }
+  return s;
+}
+
+// Formatea números con coma decimal para Excel ES
+function fmtNum(n) {
+  if (n === null || n === undefined || n === '') return '';
+  const num = Number(n);
+  if (!Number.isFinite(num)) return '';
+  return String(num).replace('.', ',');
+}
+
+function fechaArchivo() {
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}_${pad(d.getHours())}-${pad(d.getMinutes())}`;
+}
+
 // ================= PRODUCTOS =================
 
 // LISTADO PAGINADO + BUSQUEDA
@@ -180,7 +204,6 @@ app.put('/api/productos/:id', async (req, res) => {
 
 // VACIAR TODO EL INVENTARIO
 // Debe ir ANTES de /api/productos/:id.
-// Sin transacción: un solo UPDATE directo es más confiable contra Turso remoto.
 app.delete('/api/productos/reset-all', async (req, res) => {
   try {
     const upd = await db.execute('UPDATE productos SET activo = 0');
@@ -385,6 +408,115 @@ app.delete('/api/ventas/reset', async (req, res) => {
 
     res.json({ message: `Historial vaciado. Copia guardada en /backups/${backupFilename}` });
   } catch (err) { res.status(500).json({ error: 'Error durante el proceso de reseteo.' }); }
+});
+
+// ================= BACKUPS DESCARGABLES (CSV) =================
+
+// Inventario completo (incluye inactivos para tener historial completo)
+app.get('/api/backup/inventario', async (req, res) => {
+  try {
+    const productos = await dbAll(`
+      SELECT p.id, p.nombre, p.costo, p.precio, p.stock, p.codigo_barras,
+             p.es_combo, p.activo,
+             (SELECT GROUP_CONCAT(i.nombre || ' x' || ci.cantidad, ' + ')
+              FROM combo_items ci JOIN productos i ON ci.ingrediente_id = i.id
+              WHERE ci.combo_id = p.id) as componentes_txt
+      FROM productos p
+      ORDER BY p.activo DESC, p.nombre ASC
+    `);
+
+    const headers = ['ID', 'Estado', 'Tipo', 'Nombre', 'Componentes', 'Costo', 'Precio', 'Stock', 'Codigo_Barras'];
+    const rows = productos.map(p => [
+      p.id,
+      p.activo ? 'ACTIVO' : 'INACTIVO',
+      p.es_combo ? 'COMBO' : 'SUELTO',
+      p.nombre,
+      p.componentes_txt || '',
+      fmtNum(p.costo || 0),
+      fmtNum(p.precio || 0),
+      p.es_combo ? '-' : String(p.stock ?? 0),
+      p.codigo_barras || ''
+    ]);
+
+    let csv = '\uFEFF'; // BOM para que Excel muestre tildes bien
+    csv += headers.join(';') + '\r\n';
+    for (const r of rows) {
+      csv += r.map(csvEscape).join(';') + '\r\n';
+    }
+
+    // Pie con resumen
+    const activos = productos.filter(p => p.activo).length;
+    const combos = productos.filter(p => p.activo && p.es_combo).length;
+    const sinStock = productos.filter(p => p.activo && !p.es_combo && Number(p.stock) <= 0).length;
+
+    csv += '\r\n';
+    csv += `Total productos;${productos.length}\r\n`;
+    csv += `Activos;${activos}\r\n`;
+    csv += `Combos activos;${combos}\r\n`;
+    csv += `Sin stock;${sinStock}\r\n`;
+    csv += `Generado;${new Date().toLocaleString('es-AR')}\r\n`;
+
+    const filename = `inventario_${fechaArchivo()}.csv`;
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(csv);
+  } catch (err) {
+    console.error('Error en backup inventario:', err);
+    res.status(500).json({ error: 'Error al generar backup de inventario.' });
+  }
+});
+
+// Historial de ventas
+app.get('/api/backup/ventas', async (req, res) => {
+  try {
+    const ventas = await dbAll(`
+      SELECT v.id, v.fecha, v.metodo_pago, v.vendedor, v.total,
+        GROUP_CONCAT(p.nombre || ' (x' || vd.cantidad || ')', ' | ') as items_detalle
+      FROM ventas v
+      JOIN ventas_detalle vd ON v.id = vd.venta_id
+      JOIN productos p ON vd.producto_id = p.id
+      GROUP BY v.id
+      ORDER BY v.fecha DESC
+    `);
+
+    const headers = ['ID', 'Fecha', 'Vendedor', 'Metodo_Pago', 'Total', 'Detalle'];
+    const rows = ventas.map(v => [
+      v.id,
+      v.fecha,
+      v.vendedor || 'General',
+      v.metodo_pago,
+      fmtNum(v.total),
+      v.items_detalle || ''
+    ]);
+
+    let csv = '\uFEFF';
+    csv += headers.join(';') + '\r\n';
+    for (const r of rows) {
+      csv += r.map(csvEscape).join(';') + '\r\n';
+    }
+
+    // Totales al pie
+    const totalGral = ventas.reduce((s, v) => s + (Number(v.total) || 0), 0);
+    const totalEf = ventas.filter(v => v.metodo_pago === 'EFECTIVO').reduce((s, v) => s + (Number(v.total) || 0), 0);
+    const totalMp = ventas.filter(v => v.metodo_pago === 'MERCADO_PAGO').reduce((s, v) => s + (Number(v.total) || 0), 0);
+    const totalTr = ventas.filter(v => v.metodo_pago === 'TRANSFERENCIA').reduce((s, v) => s + (Number(v.total) || 0), 0);
+
+    csv += '\r\n';
+    csv += `Cantidad de ventas;${ventas.length}\r\n`;
+    csv += `TOTAL RECAUDADO;${fmtNum(totalGral)}\r\n`;
+    csv += `Efectivo;${fmtNum(totalEf)}\r\n`;
+    csv += `Mercado Pago;${fmtNum(totalMp)}\r\n`;
+    csv += `Transferencia;${fmtNum(totalTr)}\r\n`;
+    csv += `Generado;${new Date().toLocaleString('es-AR')}\r\n`;
+
+    const filename = `ventas_${fechaArchivo()}.csv`;
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(csv);
+  } catch (err) {
+    console.error('Error en backup ventas:', err);
+    res.status(500).json({ error: 'Error al generar backup de ventas.' });
+  }
 });
 
 app.listen(PORT, () => console.log(`Servidor activo en puerto ${PORT}`));
